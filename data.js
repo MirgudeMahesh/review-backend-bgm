@@ -490,6 +490,62 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
+
+
+// -----------------------------------------------------------------------------------
+// ---------- API 1: Table 1 (Stockist, Product, Sales) ----------
+app.post('/getTable1', async (req, res) => {
+  try {
+    const { territory } = req.body;
+    if (!territory) return res.status(400).json({ error: 'territory is required' });
+
+    const [rows] = await pool.query(
+      `SELECT Stockist, ProductName, Sales 
+       FROM sales1 
+       WHERE Territory = ?`,
+      [territory]
+    );
+
+    res.json({ results: rows });
+  } catch (err) {
+    console.error('Error /getTable1:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+
+// ---------- API 2: Table 2 (Pivot Summary View) ----------
+
+app.post('/getTable2', async (req, res) => {
+  try {
+    const { territory } = req.body;
+    if (!territory) return res.status(400).json({ error: 'territory is required' });
+
+    const [rows] = await pool.query(
+      `SELECT Stockist, ProductName, Sales 
+       FROM sales1 
+       WHERE Territory = ?`,
+      [territory]
+    );
+
+    // Pivot transformation in JS
+    const pivot = {};
+    rows.forEach(r => {
+      if (!pivot[r.ProductName]) {
+        pivot[r.ProductName] = { ProductName: r.ProductName, GrandTotal: 0 };
+      }
+      pivot[r.ProductName][r.Stockist] = r.Sales;
+      pivot[r.ProductName].GrandTotal += r.Sales;
+    });
+
+    res.json({ results: Object.values(pivot) });
+  } catch (err) {
+    console.error('Error /getTable2:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+
 // ---------- Start server ----------
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
