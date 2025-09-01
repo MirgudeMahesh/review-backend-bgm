@@ -77,104 +77,103 @@ pool.getConnection()
 app.get('/healthz', (_, res) => res.send('ok'));
 
 // ---------- Helper: computeAggregates ----------
-function computeAggregates(node) {
-  const childrenKeys = Object.keys(node.children);
-  if (childrenKeys.length === 0) {
-    const totalSales = node.sales.reduce((sum, s) => sum + (s.sales || 0), 0);
-    node.totalSales = totalSales;
-    return { amount: node.amount, sales: totalSales };
-  }
-
-  let sumAmount = 0;
-  let count = 0;
-  let sumSales = 0;
-
-  for (const childName of childrenKeys) {
-    const child = node.children[childName];
-    const childResult = computeAggregates(child);
-
-    sumAmount += childResult.amount;
-    sumSales += childResult.sales;
-    count++;
-  }
-
-  node.amount = count > 0 ? Math.round(sumAmount / count) : 0;
-  node.sales = sumSales;
-  node.totalSales = sumSales;
-
-  return { amount: node.amount, sales: node.sales };
-}
-
-// ---------- Hierarchy API ----------
-app.get("/hierarchy/:emp", async (req, res) => {
-  const emp = req.params.emp;
-  const query = `
-    WITH RECURSIVE downline AS (
-      SELECT Emp_Code, Emp_Name, Role, Reporting_Manager, Territory
-      FROM employee_details
-      WHERE Emp_Name = ?
-
-      UNION ALL
-
-      SELECT e.Emp_Code, e.Emp_Name, e.Role, e.Reporting_Manager, e.Territory
-      FROM employee_details e
-      JOIN downline d ON e.Reporting_Manager_Code = d.Emp_Code
-    )
-    SELECT d.Emp_Code, d.Emp_Name, d.Reporting_Manager, d.Role, d.Territory,
-           IFNULL(c.Coverage, 0) AS amount,
-           s.ProductName, s.Sales
-    FROM downline d
-    LEFT JOIN coverage_details c ON d.Emp_Code = c.Emp_Code
-    LEFT JOIN sales1 s ON d.Emp_Code = s.Emp_Code;
-  `;
+app.get("/hierarchy/:empCode", async (req, res) => {
   try {
-    const [rows] = await pool.query(query, [emp]);
+    const empCode = req.params.empCode;
 
-    const map = {};
-    const root = {};
-    const salesByEmp = {};
+    // 1. Fetch hierarchy rows
+    const [rows] = await pool.query(
+      `
+      WITH RECURSIVE downline AS (
+        SELECT Emp_Code, Emp_Name, Reporting_Manager, Reporting_Manager_Code, Role, Territory
+        FROM employee_details
+        WHERE Emp_Code = ?
+        UNION ALL
+        SELECT e.Emp_Code, e.Emp_Name, e.Reporting_Manager, e.Reporting_Manager_Code, e.Role, e.Territory
+        FROM employee_details e
+        INNER JOIN downline d ON e.Reporting_Manager_Code = d.Emp_Code
+      )
+      SELECT * FROM downline
+      `,
+      [empCode]
+    );
 
-    rows.forEach(r => {
-      if (!salesByEmp[r.Emp_Code]) salesByEmp[r.Emp_Code] = [];
-      if (r.ProductName) {
-        salesByEmp[r.Emp_Code].push({
-          productName: r.ProductName,
-          sales: r.Sales
-        });
-      }
-    });
+    // 2. Fetch sales data for all employees in this hierarchy
+    const empCodes = rows.map(r => r.Emp_Code);
+    let salesByEmp = {};
+    if (empCodes.length > 0) {
+      const [salesRows] = await pool.query(
+        `
+        SELECT Emp_Code, ProductName, Sales
+        FROM sales1
+        WHERE Emp_Code IN (?)
+        `,
+        [empCodes]
+      );
 
-    rows.forEach(r => {
-      const amount = r.Role === "BE" ? r.amount : 0;
-      if (!map[r.Emp_Name]) {
-        map[r.Emp_Name] = {
-          amount,
-          territory: r.Territory || null,
-          role: r.Role || null,
-          children: {},
-          sales: r.Role === "BE" ? (salesByEmp[r.Emp_Code] || []) : []
-        };
-      }
-    });
-
-    rows.forEach(r => {
-      if (r.Emp_Name === emp) {
-        root[r.Emp_Name] = map[r.Emp_Name];
-      } else if (map[r.Reporting_Manager]) {
-        map[r.Reporting_Manager].children[r.Emp_Name] = map[r.Emp_Name];
-      }
-    });
-
-    for (const top in root) {
-      computeAggregates(root[top]);
+      salesByEmp = salesRows.reduce((acc, s) => {
+        if (!acc[s.Emp_Code]) acc[s.Emp_Code] = [];
+        acc[s.Emp_Code].push({ productName: s.ProductName, sales: s.Sales });
+        return acc;
+      }, {});
     }
+
+    // 3. Build map keyed by Emp_Code
+    const map = {};
+    rows.forEach(r => {
+      map[r.Emp_Code] = {
+        empName: r.Emp_Name,
+        amount: r.Role === "BE" ? r.amount || 0 : 0, // if you don’t have `amount` in employee_details, this will stay 0
+        territory: r.Territory || null,
+        role: r.Role || null,
+        children: {},
+        sales: r.Role === "BE" ? (salesByEmp[r.Emp_Code] || []) : [],
+        totalSales: 0
+      };
+    });
+
+    // 4. Link children to their manager
+    let root = {};
+    rows.forEach(r => {
+      if (r.Emp_Code === empCode) {
+        root[r.Emp_Code] = map[r.Emp_Code];
+      } else if (r.Reporting_Manager_Code && map[r.Reporting_Manager_Code]) {
+        map[r.Reporting_Manager_Code].children[r.Emp_Code] = map[r.Emp_Code];
+      }
+    });
+
+    // 5. Compute aggregates
+    function computeAggregates(node) {
+      const childKeys = Object.keys(node.children);
+      if (childKeys.length === 0) {
+        const totalSales = (node.sales || []).reduce((sum, s) => sum + (s.sales || 0), 0);
+        node.totalSales = totalSales;
+        return { amount: node.amount || 0, sales: totalSales };
+      }
+
+      let sumAmount = 0, sumSales = 0, count = 0;
+      for (const key of childKeys) {
+        const child = node.children[key];
+        const childResult = computeAggregates(child);
+        sumAmount += childResult.amount;
+        sumSales += childResult.sales;
+        count++;
+      }
+
+      node.amount = count > 0 ? Math.round(sumAmount / count) : 0;
+      node.totalSales = sumSales;
+      return { amount: node.amount, sales: sumSales };
+    }
+
+    Object.values(root).forEach(r => computeAggregates(r));
 
     res.json(root);
   } catch (err) {
-    console.error("❌ Error in /hierarchy:", err);
+    console.error(err);
     res.status(500).send("Error fetching hierarchy");
   }
 });
+
 
 // ---------- Employees ----------
 app.get('/employees', async (req, res) => {
