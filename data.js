@@ -123,11 +123,12 @@ app.get("/hierarchy/:empCode", async (req, res) => {
     rows.forEach(r => {
       map[r.Emp_Code] = {
         empName: r.Emp_Name,
-        amount: r.Role === "BE" ? r.amount || 0 : 0, // if you don’t have `amount` in employee_details, this will stay 0
+        amount: r.Role === "BE" ? r.amount || 0 : 0,
         territory: r.Territory || null,
         role: r.Role || null,
         children: {},
         sales: r.Role === "BE" ? (salesByEmp[r.Emp_Code] || []) : [],
+        salesByProduct: {}, // will be filled later
         totalSales: 0
       };
     });
@@ -142,27 +143,43 @@ app.get("/hierarchy/:empCode", async (req, res) => {
       }
     });
 
-    // 5. Compute aggregates
+    // 5. Compute aggregates (salesByProduct + totalSales + avg amount)
     function computeAggregates(node) {
       const childKeys = Object.keys(node.children);
+
+      // BE level (leaf)
       if (childKeys.length === 0) {
-        const totalSales = (node.sales || []).reduce((sum, s) => sum + (s.sales || 0), 0);
-        node.totalSales = totalSales;
-        return { amount: node.amount || 0, sales: totalSales };
+        const salesByProduct = {};
+        (node.sales || []).forEach(s => {
+          salesByProduct[s.productName] =
+            (salesByProduct[s.productName] || 0) + (s.sales || 0);
+        });
+        node.salesByProduct = salesByProduct;
+        node.totalSales = Object.values(salesByProduct).reduce((a, b) => a + b, 0);
+        return { amount: node.amount || 0, salesByProduct };
       }
 
-      let sumAmount = 0, sumSales = 0, count = 0;
+      // Manager level (aggregate from children)
+      let sumAmount = 0, count = 0;
+      const aggregatedSales = {};
+
       for (const key of childKeys) {
         const child = node.children[key];
-        const childResult = computeAggregates(child);
-        sumAmount += childResult.amount;
-        sumSales += childResult.sales;
+        const { amount, salesByProduct } = computeAggregates(child);
+        sumAmount += amount;
         count++;
+
+        // merge salesByProduct from child
+        for (const [prod, val] of Object.entries(salesByProduct)) {
+          aggregatedSales[prod] = (aggregatedSales[prod] || 0) + val;
+        }
       }
 
       node.amount = count > 0 ? Math.round(sumAmount / count) : 0;
-      node.totalSales = sumSales;
-      return { amount: node.amount, sales: sumSales };
+      node.salesByProduct = aggregatedSales;
+      node.totalSales = Object.values(aggregatedSales).reduce((a, b) => a + b, 0);
+
+      return { amount: node.amount, salesByProduct: aggregatedSales };
     }
 
     Object.values(root).forEach(r => computeAggregates(r));
