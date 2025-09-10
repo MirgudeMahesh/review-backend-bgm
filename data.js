@@ -76,18 +76,20 @@ pool.getConnection()
 // ---------- Health check ----------
 app.get('/healthz', (_, res) => res.send('ok'));
 
-// ---------- Helper: computeAggregates ----------
-app.get("/hierarchy/:empCode", async (req, res) => {
-  try {
-    const empCode = req.params.empCode;
 
-    // 1. Fetch hierarchy rows
+// ---------- Helper: computeAggregates ----------
+app.post("/hierarchy", async (req, res) => {
+  try {
+    const { empterr } = req.body; // territory from request body
+    if (!empterr) return res.status(400).send("empter is required");
+
+    // 1. Fetch hierarchy starting from the territory
     const [rows] = await pool.query(
       `
       WITH RECURSIVE downline AS (
         SELECT Emp_Code, Emp_Name, Reporting_Manager, Reporting_Manager_Code, Role, Territory
         FROM employee_details
-        WHERE Emp_Code = ?
+        WHERE Territory = ?
         UNION ALL
         SELECT e.Emp_Code, e.Emp_Name, e.Reporting_Manager, e.Reporting_Manager_Code, e.Role, e.Territory
         FROM employee_details e
@@ -95,51 +97,57 @@ app.get("/hierarchy/:empCode", async (req, res) => {
       )
       SELECT * FROM downline
       `,
-      [empCode]
+      [empterr]
     );
 
-    // 2. Fetch sales data for all employees in this hierarchy
-    const empCodes = rows.map(r => r.Emp_Code);
-    let salesByEmp = {};
-    if (empCodes.length > 0) {
+    if (!rows.length) return res.json({});
+
+    // 2. Fetch sales for all employees in this hierarchy, mapped by territory
+    const territories = rows.map(r => r.Territory);
+    let salesByTerritory = {};
+    if (territories.length > 0) {
       const [salesRows] = await pool.query(
         `
-        SELECT Emp_Code, ProductName, Sales
-        FROM sales1
-        WHERE Emp_Code IN (?)
+        SELECT e.Territory, s.ProductName, s.Sales
+        FROM sales_data s
+        JOIN employee_details e ON e.Emp_Code = s.Emp_Code
+        WHERE e.Territory IN (?)
         `,
-        [empCodes]
+        [territories]
       );
 
-      salesByEmp = salesRows.reduce((acc, s) => {
-        if (!acc[s.Emp_Code]) acc[s.Emp_Code] = [];
-        acc[s.Emp_Code].push({ productName: s.ProductName, sales: s.Sales });
+      salesByTerritory = salesRows.reduce((acc, s) => {
+        if (!acc[s.Territory]) acc[s.Territory] = [];
+        acc[s.Territory].push({ productName: s.ProductName, sales: s.Sales });
         return acc;
       }, {});
     }
 
-    // 3. Build map keyed by Emp_Code
+    // 3. Build map keyed by territory
     const map = {};
     rows.forEach(r => {
-      map[r.Emp_Code] = {
+      map[r.Territory] = {
         empName: r.Emp_Name,
         amount: r.Role === "BE" ? r.amount || 0 : 0,
         territory: r.Territory || null,
         role: r.Role || null,
         children: {},
-        sales: r.Role === "BE" ? (salesByEmp[r.Emp_Code] || []) : [],
-        salesByProduct: {}, // will be filled later
+        sales: r.Role === "BE" ? (salesByTerritory[r.Territory] || []) : [],
+        salesByProduct: {},
         totalSales: 0
       };
     });
 
-    // 4. Link children to their manager
+    // 4. Link children to their manager (by territory)
     let root = {};
     rows.forEach(r => {
-      if (r.Emp_Code === empCode) {
-        root[r.Emp_Code] = map[r.Emp_Code];
-      } else if (r.Reporting_Manager_Code && map[r.Reporting_Manager_Code]) {
-        map[r.Reporting_Manager_Code].children[r.Emp_Code] = map[r.Emp_Code];
+      if (r.Territory === empterr) {
+        root[r.Territory] = map[r.Territory];
+      } else if (r.Reporting_Manager_Code) {
+        const parent = rows.find(p => p.Emp_Code === r.Reporting_Manager_Code);
+        if (parent && map[parent.Territory]) {
+          map[parent.Territory].children[r.Territory] = map[r.Territory];
+        }
       }
     });
 
@@ -147,8 +155,8 @@ app.get("/hierarchy/:empCode", async (req, res) => {
     function computeAggregates(node) {
       const childKeys = Object.keys(node.children);
 
-      // BE level (leaf)
       if (childKeys.length === 0) {
+        // Leaf (BE)
         const salesByProduct = {};
         (node.sales || []).forEach(s => {
           salesByProduct[s.productName] =
@@ -159,7 +167,7 @@ app.get("/hierarchy/:empCode", async (req, res) => {
         return { amount: node.amount || 0, salesByProduct };
       }
 
-      // Manager level (aggregate from children)
+      // Manager level
       let sumAmount = 0, count = 0;
       const aggregatedSales = {};
 
@@ -169,7 +177,7 @@ app.get("/hierarchy/:empCode", async (req, res) => {
         sumAmount += amount;
         count++;
 
-        // merge salesByProduct from child
+        // merge salesByProduct
         for (const [prod, val] of Object.entries(salesByProduct)) {
           aggregatedSales[prod] = (aggregatedSales[prod] || 0) + val;
         }
@@ -190,6 +198,9 @@ app.get("/hierarchy/:empCode", async (req, res) => {
     res.status(500).send("Error fetching hierarchy");
   }
 });
+
+
+
 
 
 // ---------- Employees ----------
@@ -516,8 +527,8 @@ app.post('/getTable1', async (req, res) => {
     if (!territory) return res.status(400).json({ error: 'territory is required' });
 
     const [rows] = await pool.query(
-      `SELECT Stockist, ProductName, Sales 
-       FROM sales1 
+      `SELECT stockistname, ProductName, Sales 
+       FROM sales_data 
        WHERE Territory = ?`,
       [territory]
     );
@@ -538,8 +549,8 @@ app.post('/getTable2', async (req, res) => {
     if (!territory) return res.status(400).json({ error: 'territory is required' });
 
     const [rows] = await pool.query(
-      `SELECT Stockist, ProductName, Sales 
-       FROM sales1 
+      `SELECT stockistname, ProductName, Sales 
+       FROM sales_data
        WHERE Territory = ?`,
       [territory]
     );
@@ -550,7 +561,7 @@ app.post('/getTable2', async (req, res) => {
       if (!pivot[r.ProductName]) {
         pivot[r.ProductName] = { ProductName: r.ProductName, GrandTotal: 0 };
       }
-      pivot[r.ProductName][r.Stockist] = r.Sales;
+      pivot[r.ProductName][r.stockistname] = r.Sales;
       pivot[r.ProductName].GrandTotal += r.Sales;
     });
 
