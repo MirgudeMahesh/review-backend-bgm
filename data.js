@@ -81,19 +81,19 @@ app.get('/healthz', (_, res) => res.send('ok'));
 app.post("/hierarchy", async (req, res) => {
   try {
     const { empterr } = req.body; // territory from request body
-    if (!empterr) return res.status(400).send("empter is required");
+    if (!empterr) return res.status(400).send("empterr is required");
 
     // 1. Fetch hierarchy starting from the territory
     const [rows] = await pool.query(
       `
       WITH RECURSIVE downline AS (
-        SELECT Emp_Code, Emp_Name, Reporting_Manager, Reporting_Manager_Code, Role, Territory
+        SELECT Emp_Code, Emp_Name, Reporting_Manager, Reporting_Manager_Code, Role, Territory, Area_Name
         FROM employee_details
         WHERE Territory = ?
         UNION ALL
-        SELECT e.Emp_Code, e.Emp_Name, e.Reporting_Manager, e.Reporting_Manager_Code, e.Role, e.Territory
+        SELECT e.Emp_Code, e.Emp_Name, e.Reporting_Manager, e.Reporting_Manager_Code, e.Role, e.Territory, e.Area_Name
         FROM employee_details e
-        INNER JOIN downline d ON e.Reporting_Manager_Code = d.Emp_Code
+        INNER JOIN downline d ON e.Area_Name = d.Territory
       )
       SELECT * FROM downline
       `,
@@ -110,7 +110,7 @@ app.post("/hierarchy", async (req, res) => {
         `
         SELECT e.Territory, s.ProductName, s.Sales
         FROM sales_data s
-        JOIN employee_details e ON e.Emp_Code = s.Emp_Code
+        JOIN employee_details e ON e.Territory = s.Territory
         WHERE e.Territory IN (?)
         `,
         [territories]
@@ -128,23 +128,23 @@ app.post("/hierarchy", async (req, res) => {
     rows.forEach(r => {
       map[r.Territory] = {
         empName: r.Emp_Name,
-        amount: r.Role === "BE" ? r.amount || 0 : 0,
+        amount: r.Role === "BE" ? 0 : 0, // no direct amount column → keep 0
         territory: r.Territory || null,
         role: r.Role || null,
         children: {},
         sales: r.Role === "BE" ? (salesByTerritory[r.Territory] || []) : [],
         salesByProduct: {},
-        totalSales: 0
+        totalSales: 0,
       };
     });
 
-    // 4. Link children to their manager (by territory)
+    // 4. Link children to their manager (by Area_Name → parent Territory)
     let root = {};
     rows.forEach(r => {
       if (r.Territory === empterr) {
         root[r.Territory] = map[r.Territory];
-      } else if (r.Reporting_Manager_Code) {
-        const parent = rows.find(p => p.Emp_Code === r.Reporting_Manager_Code);
+      } else if (r.Area_Name) {
+        const parent = rows.find(p => p.Territory === r.Area_Name);
         if (parent && map[parent.Territory]) {
           map[parent.Territory].children[r.Territory] = map[r.Territory];
         }
