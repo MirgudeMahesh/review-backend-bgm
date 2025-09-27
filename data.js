@@ -10,53 +10,25 @@ const app = express();
 
 // ---------- CORS ----------
 // Use FRONTEND_ORIGIN in production; fallback to localhost for local dev
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
+const FRONTEND_ORIGIN = ['http://localhost:3000', 'http://192.168.0.157:3000'];
 app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json());
 
-// ---------- DB pool (supports DATABASE_URL or individual env vars) ----------
+// ---------- LOCAL DB pool (no env) ----------
 let pool;
 
 try {
-  let sslOptions;
-  if (process.env.DB_SSL === 'true') {
-    const certPath = path.resolve(__dirname, 'certs', 'aiven-ca.pem');
-    if (fs.existsSync(certPath)) {
-      sslOptions = {
-        ca: fs.readFileSync(certPath),
-        rejectUnauthorized: true,
-      };
-      console.log('🔐 Using Aiven CA certificate for SSL');
-    } else {
-      sslOptions = { rejectUnauthorized: true };
-      console.log('🔐 Using default SSL (no CA file found)');
-    }
-  }
+  pool = mysql.createPool({
+    host: 'localhost',
+    port: 3306,
+    user: 'root',
+    password: 'root',
+    database: 'pulse_new',
+    waitForConnections: true,
+    connectionLimit: 20,
+  });
 
-  if (process.env.DATABASE_URL) {
-    const dbUrl = new URL(process.env.DATABASE_URL);
-    pool = mysql.createPool({
-      host: dbUrl.hostname,
-      port: dbUrl.port ? Number(dbUrl.port) : 3306,
-      user: decodeURIComponent(dbUrl.username),
-      password: decodeURIComponent(dbUrl.password),
-      database: dbUrl.pathname.replace('/', ''),
-      waitForConnections: true,
-      connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 20),
-      ssl: sslOptions,
-    });
-  } else {
-    pool = mysql.createPool({
-      host: process.env.DB_HOST || 'localhost',
-      port: Number(process.env.DB_PORT || 3306),
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || 'root',
-      database: process.env.DB_NAME || 'pulse_new',
-      waitForConnections: true,
-      connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 20),
-      ssl: sslOptions,
-    });
-  }
+  console.log('💻 Using LOCAL MySQL (pulse_new @ localhost)');
 } catch (err) {
   console.error('❌ Error creating DB pool:', err);
   process.exit(1);
@@ -65,11 +37,11 @@ try {
 // Test connection
 pool.getConnection()
   .then(conn => {
-    console.log('✅ MySQL connected to Aiven successfully!');
+    console.log('✅ MySQL connected to local successfully!');
     conn.release();
   })
   .catch(err => {
-    console.error('❌ Failed to connect to Aiven MySQL:', err.message);
+    console.error('❌ Failed to connect to local MySQL:', err.message);
     process.exit(1);
   });
 
@@ -80,10 +52,10 @@ app.get('/healthz', (_, res) => res.send('ok'));
 // ---------- Helper: computeAggregates ----------
 app.post("/hierarchy", async (req, res) => {
   try {
-    const { empterr } = req.body; // territory from request body
+    const { empterr } = req.body;
     if (!empterr) return res.status(400).send("empterr is required");
 
-    // 1. Fetch hierarchy starting from the territory
+    // 1. Fetch hierarchy
     const [rows] = await pool.query(
       `
       WITH RECURSIVE downline AS (
@@ -102,7 +74,7 @@ app.post("/hierarchy", async (req, res) => {
 
     if (!rows.length) return res.json({});
 
-    // 2. Fetch sales for all employees in this hierarchy, mapped by territory
+    // 2. Fetch sales data for BE’s
     const territories = rows.map(r => r.Territory);
     let salesByTerritory = {};
     if (territories.length > 0) {
@@ -123,22 +95,51 @@ app.post("/hierarchy", async (req, res) => {
       }, {});
     }
 
-    // 3. Build map keyed by territory
+    // 3. Fetch BE metrics (Coverage, Calls, Compliance, Chemist_Calls)
+    let metricsByTerritory = {};
+    if (territories.length > 0) {
+      const [metricRows] = await pool.query(
+        `
+        SELECT Territory, Coverage, Calls, Compliance, Chemist_Calls
+        FROM dashboard1
+        WHERE Territory IN (?)
+        `,
+        [territories]
+      );
+
+      metricsByTerritory = metricRows.reduce((acc, m) => {
+        acc[m.Territory] = {
+          Coverage: m.Coverage || 0,
+          Calls: m.Calls || 0,
+          Compliance: m.Compliance || 0,
+          Chemist_Calls: m.Chemist_Calls || 0,
+        };
+        return acc;
+      }, {});
+    }
+
+    // 4. Build map
     const map = {};
     rows.forEach(r => {
       map[r.Territory] = {
         empName: r.Emp_Name,
-        amount: r.Role === "BE" ? 0 : 0, // no direct amount column → keep 0
-        territory: r.Territory || null,
-        role: r.Role || null,
+        amount: (r.Role === "BE" ||r.Role==='TE') ? 0 : 0,
+        territory: r.Territory,
+        role: r.Role,
         children: {},
-        sales: r.Role === "BE" ? (salesByTerritory[r.Territory] || []) : [],
+        sales: (r.Role === "BE" ||r.Role==='TE') ? (salesByTerritory[r.Territory] || []) : [],
         salesByProduct: {},
         totalSales: 0,
+
+        // NEW: metrics
+        Coverage: (r.Role === "BE" ||r.Role==='TE') ? (metricsByTerritory[r.Territory]?.Coverage || 0) : 0,
+        Calls: (r.Role === "BE" ||r.Role==='TE') ? (metricsByTerritory[r.Territory]?.Calls || 0) : 0,
+        Compliance: (r.Role === "BE" ||r.Role==='TE') ? (metricsByTerritory[r.Territory]?.Compliance || 0) : 0,
+        Chemist_Calls: (r.Role === "BE" ||r.Role==='TE') ? (metricsByTerritory[r.Territory]?.Chemist_Calls || 0) : 0,
       };
     });
 
-    // 4. Link children to their manager (by Area_Name → parent Territory)
+    // 5. Link children
     let root = {};
     rows.forEach(r => {
       if (r.Territory === empterr) {
@@ -151,12 +152,12 @@ app.post("/hierarchy", async (req, res) => {
       }
     });
 
-    // 5. Compute aggregates (salesByProduct + totalSales + avg amount)
+    // 6. Compute aggregates (sales + new metrics)
     function computeAggregates(node) {
       const childKeys = Object.keys(node.children);
 
       if (childKeys.length === 0) {
-        // Leaf (BE)
+        // BE
         const salesByProduct = {};
         (node.sales || []).forEach(s => {
           salesByProduct[s.productName] =
@@ -164,30 +165,61 @@ app.post("/hierarchy", async (req, res) => {
         });
         node.salesByProduct = salesByProduct;
         node.totalSales = Object.values(salesByProduct).reduce((a, b) => a + b, 0);
-        return { amount: node.amount || 0, salesByProduct };
+        return {
+          amount: node.amount,
+          salesByProduct,
+          metrics: {
+            Coverage: node.Coverage,
+            Calls: node.Calls,
+            Compliance: node.Compliance,
+            Chemist_Calls: node.Chemist_Calls,
+          },
+        };
       }
 
-      // Manager level
+      // Manager
       let sumAmount = 0, count = 0;
       const aggregatedSales = {};
+      const metricsSum = { Coverage: 0, Calls: 0, Compliance: 0, Chemist_Calls: 0 };
 
       for (const key of childKeys) {
         const child = node.children[key];
-        const { amount, salesByProduct } = computeAggregates(child);
+        const { amount, salesByProduct, metrics } = computeAggregates(child);
         sumAmount += amount;
         count++;
 
-        // merge salesByProduct
+        // merge sales
         for (const [prod, val] of Object.entries(salesByProduct)) {
           aggregatedSales[prod] = (aggregatedSales[prod] || 0) + val;
         }
+
+        // sum metrics
+        metricsSum.Coverage += metrics.Coverage;
+        metricsSum.Calls += metrics.Calls;
+        metricsSum.Compliance += metrics.Compliance;
+        metricsSum.Chemist_Calls += metrics.Chemist_Calls;
       }
 
       node.amount = count > 0 ? Math.round(sumAmount / count) : 0;
       node.salesByProduct = aggregatedSales;
       node.totalSales = Object.values(aggregatedSales).reduce((a, b) => a + b, 0);
 
-      return { amount: node.amount, salesByProduct: aggregatedSales };
+      // average metrics for managers
+      node.Coverage = count > 0 ? Math.round(metricsSum.Coverage / count) : 0;
+      node.Calls = count > 0 ? Math.round(metricsSum.Calls / count) : 0;
+      node.Compliance = count > 0 ? Math.round(metricsSum.Compliance / count) : 0;
+      node.Chemist_Calls = count > 0 ? Math.round(metricsSum.Chemist_Calls / count) : 0;
+
+      return {
+        amount: node.amount,
+        salesByProduct: aggregatedSales,
+        metrics: {
+          Coverage: node.Coverage,
+          Calls: node.Calls,
+          Compliance: node.Compliance,
+          Chemist_Calls: node.Chemist_Calls,
+        },
+      };
     }
 
     Object.values(root).forEach(r => computeAggregates(r));
@@ -265,6 +297,128 @@ app.post('/putData', async (req, res) => {
   } catch (err) {
     console.error('Error /putData:', err);
     return res.status(500).send('Internal Server Error');
+  }
+});
+app.post("/hierarchy-kpi", async (req, res) => {
+  try {
+    const { empterr } = req.body;
+    if (!empterr) return res.status(400).send("empterr is required");
+
+    // 1. Build hierarchy using recursive CTE
+    const [rows] = await pool.query(
+      `
+      WITH RECURSIVE downline AS (
+        SELECT Emp_Code, Emp_Name, Reporting_Manager, Reporting_Manager_Code, Role, Territory, Area_Name
+        FROM employee_details
+        WHERE Territory = ?
+        UNION ALL
+        SELECT e.Emp_Code, e.Emp_Name, e.Reporting_Manager, e.Reporting_Manager_Code, e.Role, e.Territory, e.Area_Name
+        FROM employee_details e
+        INNER JOIN downline d ON e.Area_Name = d.Territory
+      )
+      SELECT * FROM downline
+      `,
+      [empterr]
+    );
+
+    if (!rows.length) return res.json({});
+
+    // 2. Fetch KPI values for BE's from dashboard1
+    const territories = rows.map(r => r.Territory);
+    let kpiByTerritory = {};
+    if (territories.length > 0) {
+      const [kpiRows] = await pool.query(
+        `
+        SELECT Territory, Calls, Coverage, Compliance, Chemist_Calls
+        FROM dashboard1
+        WHERE Territory IN (?)
+        `,
+        [territories]
+      );
+
+      kpiByTerritory = kpiRows.reduce((acc, r) => {
+        acc[r.Territory] = {
+          Calls: r.Calls || 0,
+          Coverage: r.Coverage || 0,
+          Compliance: r.Compliance || 0,
+          Chemist_Calls: r.Chemist_Calls || 0,
+        };
+        return acc;
+      }, {});
+    }
+
+    // 3. Build map keyed by territory
+    const map = {};
+    rows.forEach(r => {
+      map[r.Territory] = {
+        empName: r.Emp_Name,
+        role: r.Role,
+        territory: r.Territory,
+        metrics: (r.Role === "BE" ||r.Role==='TE') ? (kpiByTerritory[r.Territory] || {
+          Calls: 0,
+          Coverage: 0,
+          Compliance: 0,
+          Chemist_Calls: 0
+        }) : { Calls: 0, Coverage: 0, Compliance: 0, Chemist_Calls: 0 },
+        children: {}
+      };
+    });
+
+    // 4. Link children to their parent
+    let root = {};
+    rows.forEach(r => {
+      if (r.Territory === empterr) {
+        root[r.Territory] = map[r.Territory];
+      } else if (r.Area_Name) {
+        const parent = rows.find(p => p.Territory === r.Area_Name);
+        if (parent && map[parent.Territory]) {
+          map[parent.Territory].children[r.Territory] = map[r.Territory];
+        }
+      }
+    });
+
+    // 5. Compute averages bottom-up (direct child averaging)
+    function computeAverages(node) {
+      const childKeys = Object.keys(node.children);
+
+      if (childKeys.length === 0) {
+        // BE → already has values
+        return { ...node.metrics, count: 1 };
+      }
+
+      let totals = { Calls: 0, Coverage: 0, Compliance: 0, Chemist_Calls: 0 };
+      let childCount = 0;
+
+      for (const key of childKeys) {
+        const child = node.children[key];
+        const childAgg = computeAverages(child);
+
+        // Aggregate based on **child metrics**, not leaves
+        totals.Calls += child.metrics.Calls;
+        totals.Coverage += child.metrics.Coverage;
+        totals.Compliance += child.metrics.Compliance;
+        totals.Chemist_Calls += child.metrics.Chemist_Calls;
+
+        childCount++;
+      }
+
+      // Average across direct children
+      node.metrics = {
+        Calls: childCount > 0 ? Math.round(totals.Calls / childCount) : 0,
+        Coverage: childCount > 0 ? Math.round(totals.Coverage / childCount) : 0,
+        Compliance: childCount > 0 ? Math.round(totals.Compliance / childCount) : 0,
+        Chemist_Calls: childCount > 0 ? Math.round(totals.Chemist_Calls / childCount) : 0,
+      };
+
+      return { ...totals, count: childCount };
+    }
+
+    Object.values(root).forEach(r => computeAverages(r));
+
+    res.json(root);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error fetching KPI hierarchy");
   }
 });
 
@@ -348,22 +502,22 @@ app.get('/getData/:receiver_territory', async (req, res) => {
 // ---------- Update receiver commit date ----------
 app.put('/updateReceiverCommitDate', async (req, res) => {
   try {
-    const { metric, sender_code, receiver_code, receiver_commit_date } = req.body;
-    if (!metric || !sender_code || !receiver_code || !receiver_commit_date) {
+    const { metric, sender_territory, receiver_territory, receiver_commit_date } = req.body;
+    if (!metric || !sender_territory || !receiver_territory || !receiver_commit_date) {
       return res.status(400).send('metric, sender_code, receiver_code, and receiver_commit_date are required');
     }
 
     const query = `
       UPDATE commitments
       SET receiver_commit_date = ?
-      WHERE metric = ? AND sender_code = ? AND receiver_code = ?
+      WHERE metric = ? AND sender_territory = ? AND receiver_territory = ?
     `;
 
     const [result] = await pool.query(query, [
       receiver_commit_date,
       metric,
-      sender_code,
-      receiver_code
+      sender_territory,
+      receiver_territory
     ]);
 
     if (result.affectedRows === 0) {
@@ -376,6 +530,8 @@ app.put('/updateReceiverCommitDate', async (req, res) => {
     res.status(500).send('Internal Server Error');
   }
 });
+
+
 
 // ---------- Add disclosure ----------
 app.post("/addEscalation", async (req, res) => {
@@ -418,27 +574,37 @@ app.post("/addEscalation", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
+// 📌 Get all information records
+app.get('/getInfo', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM information ORDER BY received_date DESC');
+    res.json(rows);
+  } catch (err) {
+    console.error('Error /getInfo:', err);
+    res.status(500).send('Internal Server Error');
+  }
+});
 
 // ---------- Insert info ----------
 app.post('/putInfo', async (req, res) => {
   try {
-    const dataToInsert = req.body;
-    const dataArray = Array.isArray(dataToInsert) ? dataToInsert : [dataToInsert];
+    const data = Array.isArray(req.body) ? req.body : [req.body];
 
-    if (dataArray.length === 0) {
-      return res.status(400).send('No data received');
+    if (data.length === 0) {
+      return res.status(400).json({ error: "No data received" });
     }
 
-    const values = dataArray.map(row => [
-      row.sender,
-      row.sender_code,
-      row.sender_territory,
-      row.receiver,
-      row.receiver_code,
-      row.receiver_territory,
-      row.received_date,
-      row.message
+    const values = data.map(row => [
+      row.sender || null,
+      row.sender_code || null,
+      row.sender_territory || null,
+      row.receiver || null,
+      row.receiver_code || null,
+      row.receiver_territory || null,
+      row.received_date || null,
+      row.message || null
     ]);
+
 
     const query = `
       INSERT INTO information (
@@ -453,13 +619,17 @@ app.post('/putInfo', async (req, res) => {
       ) VALUES ?
     `;
 
+    // ✅ Use query, not execute
     await pool.query(query, [values]);
-    return res.status(201).send('success');
+
+    return res.status(201).json({ success: true, inserted: values.length });
   } catch (err) {
-    console.error('Error /putInfo:', err);
-    return res.status(500).send('Internal Server Error');
+    console.error("Error /putInfo:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+
 
 // ---------- Filter data (VALIDATE metric to prevent injection) ----------
 const ALLOWED_METRICS = ['Coverage', 'coverage', 'some_numeric_column']; // <- Replace with your actual numeric columns
@@ -475,12 +645,13 @@ app.post("/filterData", async (req, res) => {
     }
 
     const query = `
-      SELECT Territory_Name, Emp_Code, Employee_Name, \`${metric}\`
-      FROM coverage_details
+      SELECT Territory, Emp_Code, Emp_Name, \`${metric}\`
+      FROM dashboard1
       WHERE \`${metric}\` BETWEEN ? AND ?
     `;
     const [rows] = await pool.query(query, [from, to]);
     res.json(rows);
+    console.log(rows)
   } catch (error) {
     console.error("Error /filterData:", error);
     res.status(500).json({ error: "Database error" });
@@ -575,4 +746,6 @@ app.post('/getTable2', async (req, res) => {
 
 // ---------- Start server ----------
 const PORT = process.env.PORT || 8000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Backend server running on http://0.0.0.0:${PORT}`);
+});

@@ -1,13 +1,20 @@
 {
+  "name": "backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend for full-stack app",
+  "main": "data.js",
+  "scripts": {
+    "start": "node data.js",
+    "dev": "nodemon --watch . --exec node data.js"
+  },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
-    "mysql2": "^3.14.3",
-    "nodemon": "^3.1.10"
+    "mysql2": "^3.14.3"
   },
-    "scripts": {
-    "start": "node data.js",
-    "dev": "nodemon data.js"
+  "devDependencies": {
+    "nodemon": "^3.1.10"
   }
 }
