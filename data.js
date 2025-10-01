@@ -490,7 +490,7 @@ app.get('/getData/:receiver_territory', async (req, res) => {
     const [rows] = await pool.query(query, [receiver_territory]);
 
     if (rows.length === 0) {
-      return res.status(404).send('No data found for this territory');
+  return res.status(200).json([]);  // ✅ return empty array instead of 404
     }
     return res.status(200).json(rows);
   } catch (err) {
@@ -500,33 +500,49 @@ app.get('/getData/:receiver_territory', async (req, res) => {
 });
 
 // ---------- Update receiver commit date ----------
-app.put('/updateReceiverCommitDate', async (req, res) => {
+app.put('/updateCommitment', async (req, res) => {
   try {
-    const { metric, sender_territory, receiver_territory, receiver_commit_date } = req.body;
-    if (!metric || !sender_territory || !receiver_territory || !receiver_commit_date) {
-      return res.status(400).send('metric, sender_code, receiver_code, and receiver_commit_date are required');
+    const { metric, sender_territory, receiver_territory, receiver_commit_date, goal } = req.body;
+
+    if (!metric || !sender_territory || !receiver_territory) {
+      return res.status(400).send('metric, sender_territory, and receiver_territory are required');
     }
+
+    // Build dynamic query fields
+    const fields = [];
+    const values = [];
+
+    if (receiver_commit_date !== undefined) {
+      fields.push('receiver_commit_date = ?');
+      values.push(receiver_commit_date);
+    }
+
+    if (goal !== undefined) {
+      fields.push('goal = ?');
+      values.push(goal);
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).send('Nothing to update');
+    }
+
+    values.push(metric, sender_territory, receiver_territory);
 
     const query = `
       UPDATE commitments
-      SET receiver_commit_date = ?
+      SET ${fields.join(', ')}
       WHERE metric = ? AND sender_territory = ? AND receiver_territory = ?
     `;
 
-    const [result] = await pool.query(query, [
-      receiver_commit_date,
-      metric,
-      sender_territory,
-      receiver_territory
-    ]);
+    const [result] = await pool.query(query, values);
 
     if (result.affectedRows === 0) {
       return res.status(404).send('No matching commitment found');
     }
 
-    res.status(200).send('Date updated successfully');
+    res.status(200).send('Commitment updated successfully');
   } catch (err) {
-    console.error('Error /updateReceiverCommitDate:', err);
+    console.error('Error /updateCommitment:', err);
     res.status(500).send('Internal Server Error');
   }
 });
