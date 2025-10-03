@@ -610,16 +610,29 @@ app.post('/putInfo', async (req, res) => {
       return res.status(400).json({ error: "No data received" });
     }
 
-    const values = data.map(row => [
-      row.sender || null,
-      row.sender_code || null,
-      row.sender_territory || null,
-      row.receiver || null,
-      row.receiver_code || null,
-      row.receiver_territory || null,
-      row.received_date || null,
-      row.message || null
-    ]);
+const values = data.map(row => {
+  let personalizedMsg = row.message;
+
+  // Replace placeholders
+  if (personalizedMsg.includes("@name")) {
+    personalizedMsg = personalizedMsg.replace(/@name/g, row.receiver);
+  }
+  if (personalizedMsg.includes("@metric") && row.metric !== undefined) {
+    personalizedMsg = personalizedMsg.replace(/@metric/g, row.metric);
+  }
+
+  return [
+    row.sender || null,
+    row.sender_code || null,
+    row.sender_territory || null,
+    row.receiver || null,
+    row.receiver_code || null,
+    row.receiver_territory || null,
+    row.received_date || null,
+    personalizedMsg || null
+  ];
+});
+
 
 
     const query = `
@@ -648,7 +661,7 @@ app.post('/putInfo', async (req, res) => {
 
 
 // ---------- Filter data (VALIDATE metric to prevent injection) ----------
-const ALLOWED_METRICS = ['Coverage', 'coverage', 'some_numeric_column']; // <- Replace with your actual numeric columns
+const ALLOWED_METRICS = ['Coverage', 'Compliance', 'Calls', 'Drs_Met']; // <- Replace with your actual numeric columns
 app.post("/filterData", async (req, res) => {
   try {
     const { metric, from, to } = req.body;
@@ -667,7 +680,7 @@ app.post("/filterData", async (req, res) => {
     `;
     const [rows] = await pool.query(query, [from, to]);
     res.json(rows);
-    console.log(rows)
+   
   } catch (error) {
     console.error("Error /filterData:", error);
     res.status(500).json({ error: "Database error" });
