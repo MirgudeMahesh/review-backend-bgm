@@ -8,6 +8,10 @@ const path = require('path');
 
 const app = express();
 
+const GEMINI_API_KEY = "AIzaSyATNAvqNh49YuO5ECjn6TR-BcaAFjNC3Ws";
+const GEMINI_API_MODEL = 'gemini-2.5-flash-preview-05-20';
+const GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_API_URL = `${GEMINI_API_BASE_URL}/${GEMINI_API_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 // ---------- CORS ----------
 // Use FRONTEND_ORIGIN in production; fallback to localhost for local dev
 const FRONTEND_ORIGIN = ['http://localhost:3000', 'http://192.168.0.157:3000'];
@@ -770,6 +774,96 @@ app.post('/getTable2', async (req, res) => {
     console.error('Error /getTable2:', err);
     res.status(500).json({ error: 'Database error' });
   }
+});
+
+
+// ---------- AI Assistant Route ----------
+
+
+
+app.post('/api/ask-ai', async (req, res) => {
+    // NOTE: 'pool' is assumed to be the connected MySQL pool instance.
+    const { question, table } = req.body;
+
+    // 1) Basic validation
+    if (!question || question.trim() === '') {
+        return res.status(400).json({ error: 'Question cannot be empty' });
+    }
+    if (!table || table.trim() === '') {
+        return res.status(400).json({ error: 'Table name is required' });
+    }
+
+    // 2) Whitelist allowed tables to prevent SQL injection on identifier
+    const allowedTables = ['employee_details', 'commitments', 'dashboard1'];
+    if (!allowedTables.includes(table)) {
+        return res.status(400).json({ error: 'Invalid table selected.' });
+    }
+
+    try {
+        // 3) Fetch all columns safely (identifier placeholder)
+        // This line assumes 'pool' is an active database connection pool (e.g., from mysql2/promise)
+        const [rows] = await pool.query('SELECT * FROM ??', [table]);
+
+        if (!rows || rows.length === 0) {
+            return res.json({ answer: `No data found in ${table}.` });
+        }
+
+        // 4) Convert rows to readable text for AI (cap volume to protect token usage)
+        const maxRows = 200;
+        const limited = rows.slice(0, maxRows);
+        const formattedData = limited.map(r => JSON.stringify(r)).join('\n');
+
+        // 5) Build Gemini payload
+        const systemPrompt = `You are a data analyst. Answer using only the provided data from table: ${table}. If the question cannot be answered from the data, say so.`;
+        const userQuery = `Here is the ${table} data (first ${limited.length} of ${rows.length} rows):\n${formattedData}\n\nQuestion: ${question}`;
+
+        const payload = {
+            // User query goes into the contents array
+            contents: [{ parts: [{ text: userQuery }] }],
+
+            // System instructions guide the model's behavior and persona
+            systemInstruction: {
+                parts: [{ text: systemPrompt }]
+            },
+
+            // Other generation configuration (optional, but good practice)
+            generationConfig: {
+                temperature: 0.2
+            }
+        };
+
+        // 6) Call Gemini API (using the pre-configured URL)
+        const response = await fetch(GEMINI_API_URL, {
+            method: 'POST',
+            headers: {
+                // No Authorization header needed; key is in the query string
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Gemini API error response:', errorText);
+            // Attempt to parse JSON error if possible, otherwise send raw text
+            try {
+                const errorData = JSON.parse(errorText);
+                return res.status(response.status).json({ error: errorData.error?.message || 'Gemini API returned an error.' });
+            } catch {
+                return res.status(response.status).json({ error: 'Gemini API returned an unknown error: ' + errorText });
+            }
+        }
+
+        const data = await response.json();
+
+        // Extract the generated text from the Gemini response structure
+        const answer = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No answer available.';
+
+        res.json({ answer });
+    } catch (err) {
+        console.error('❌ ask-ai error:', err);
+        res.status(500).json({ error: 'AI query failed due to an internal server error.' });
+    }
 });
 
 
