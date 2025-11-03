@@ -54,186 +54,126 @@ app.get('/healthz', (_, res) => res.send('ok'));
 
 
 // ---------- Helper: computeAggregates ----------
+// ---------- Hierarchy Route (Fixed) ----------
+
 app.post("/hierarchy", async (req, res) => {
   try {
-    const { empterr } = req.body;
-    if (!empterr) return res.status(400).send("empterr is required");
+    const { territory } = req.body || {};
 
-    // 1. Fetch hierarchy
-    const [rows] = await pool.query(
-      `
-      WITH RECURSIVE downline AS (
-        SELECT Emp_Code, Emp_Name, Reporting_Manager, Reporting_Manager_Code, Role, Territory, Area_Name
-        FROM employee_details
-        WHERE Territory = ?
-        UNION ALL
-        SELECT e.Emp_Code, e.Emp_Name, e.Reporting_Manager, e.Reporting_Manager_Code, e.Role, e.Territory, e.Area_Name
-        FROM employee_details e
-        INNER JOIN downline d ON e.Area_Name = d.Territory
-      )
-      SELECT * FROM downline
-      `,
-      [empterr]
-    );
+    const [rows] = await pool.query("SELECT * FROM hierarchy_metrics_agg1");
+    if (!rows.length) return res.json({ message: "No data found" });
 
-    if (!rows.length) return res.json({});
+    // ✅ Safely parse and preserve sales_by_product
+    for (const r of rows) {
+      if (r.sales_by_product && typeof r.sales_by_product === "string") {
+        try {
+          r.sales_by_product = JSON.parse(r.sales_by_product.trim());
+        } catch {
+          r.sales_by_product = {};
+        }
+      } else if (typeof r.sales_by_product !== "object" || r.sales_by_product === null) {
+        r.sales_by_product = {};
+      }
+    }
 
-    // 2. Fetch sales data for BE’s
-    const territories = rows.map(r => r.Territory);
-    let salesByTerritory = {};
-    if (territories.length > 0) {
-      const [salesRows] = await pool.query(
-        `
-        SELECT e.Territory, s.ProductName, s.Sales
-        FROM sales_data s
-        JOIN employee_details e ON e.Territory = s.Territory
-        WHERE e.Territory IN (?)
-        `,
-        [territories]
+    const byTerritory = {};
+    rows.forEach((r) => (byTerritory[r.Territory] = r));
+
+    const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + (b || 0), 0) / arr.length : 0);
+
+    function buildNode(terr) {
+      const emp = byTerritory[terr];
+      if (!emp) return null;
+
+      const childRows = rows.filter(
+        (r) => r.Area_Name && r.Area_Name.trim() === emp.Territory.trim()
       );
 
-      salesByTerritory = salesRows.reduce((acc, s) => {
-        if (!acc[s.Territory]) acc[s.Territory] = [];
-        acc[s.Territory].push({ productName: s.ProductName, sales: s.Sales });
-        return acc;
-      }, {});
-    }
+      const children = {};
+      for (const c of childRows) {
+        const childNode = buildNode(c.Territory);
+        if (childNode) children[c.Territory] = childNode;
+      }
 
-    // 3. Fetch BE metrics (Coverage, Calls, Compliance, Chemist_Calls)
-    let metricsByTerritory = {};
-    if (territories.length > 0) {
-      const [metricRows] = await pool.query(
-        `
-        SELECT Territory, Coverage, Calls, Compliance, Chemist_Calls
-        FROM dashboard1
-        WHERE Territory IN (?)
-        `,
-        [territories]
-      );
-
-      metricsByTerritory = metricRows.reduce((acc, m) => {
-        acc[m.Territory] = {
-          Coverage: m.Coverage || 0,
-          Calls: m.Calls || 0,
-          Compliance: m.Compliance || 0,
-          Chemist_Calls: m.Chemist_Calls || 0,
-        };
-        return acc;
-      }, {});
-    }
-
-    // 4. Build map
-    const map = {};
-    rows.forEach(r => {
-      map[r.Territory] = {
-        empName: r.Emp_Name,
-        amount: (r.Role === "BE" ||r.Role==='TE') ? 0 : 0,
-        territory: r.Territory,
-        role: r.Role,
-        children: {},
-        sales: (r.Role === "BE" ||r.Role==='TE') ? (salesByTerritory[r.Territory] || []) : [],
-        salesByProduct: {},
-        totalSales: 0,
-
-        // NEW: metrics
-        Coverage: (r.Role === "BE" ||r.Role==='TE') ? (metricsByTerritory[r.Territory]?.Coverage || 0) : 0,
-        Calls: (r.Role === "BE" ||r.Role==='TE') ? (metricsByTerritory[r.Territory]?.Calls || 0) : 0,
-        Compliance: (r.Role === "BE" ||r.Role==='TE') ? (metricsByTerritory[r.Territory]?.Compliance || 0) : 0,
-        Chemist_Calls: (r.Role === "BE" ||r.Role==='TE') ? (metricsByTerritory[r.Territory]?.Chemist_Calls || 0) : 0,
+      let node = {
+        empName: emp.Emp_Name,
+        amount: 0,
+        territory: emp.Territory,
+        role: emp.Role,
+        children,
+        // ✅ sales (array) comes BEFORE salesByProduct
+        sales: Object.entries(emp.sales_by_product || {}).map(([k, v]) => ({
+          productName: k,
+          sales: v,
+        })),
+        salesByProduct: emp.sales_by_product || {},
+        totalSales: parseFloat(emp.total_sales) || 0,
+        Coverage: emp.Coverage ? parseFloat(emp.Coverage) : 0,
+        Calls: emp.Calls ? parseFloat(emp.Calls) : 0,
+        Compliance: emp.Compliance ? parseFloat(emp.Compliance) : 0,
+        Chemist_Calls: emp.Chemist_Calls ? parseFloat(emp.Chemist_Calls) : 0,
       };
-    });
 
-    // 5. Link children
-    let root = {};
-    rows.forEach(r => {
-      if (r.Territory === empterr) {
-        root[r.Territory] = map[r.Territory];
-      } else if (r.Area_Name) {
-        const parent = rows.find(p => p.Territory === r.Area_Name);
-        if (parent && map[parent.Territory]) {
-          map[parent.Territory].children[r.Territory] = map[r.Territory];
-        }
-      }
-    });
-
-    // 6. Compute aggregates (sales + new metrics)
-    function computeAggregates(node) {
-      const childKeys = Object.keys(node.children);
-
-      if (childKeys.length === 0) {
-        // BE
-        const salesByProduct = {};
-        (node.sales || []).forEach(s => {
-          salesByProduct[s.productName] =
-            (salesByProduct[s.productName] || 0) + (s.sales || 0);
-        });
-        node.salesByProduct = salesByProduct;
-        node.totalSales = Object.values(salesByProduct).reduce((a, b) => a + b, 0);
-        return {
-          amount: node.amount,
-          salesByProduct,
-          metrics: {
-            Coverage: node.Coverage,
-            Calls: node.Calls,
-            Compliance: node.Compliance,
-            Chemist_Calls: node.Chemist_Calls,
-          },
+      if (Object.keys(children).length > 0) {
+        const agg = {
+          salesByProduct: {},
+          totalSales: 0,
+          Coverage: [],
+          Calls: [],
+          Compliance: [],
+          Chemist_Calls: [],
         };
-      }
 
-      // Manager
-      let sumAmount = 0, count = 0;
-      const aggregatedSales = {};
-      const metricsSum = { Coverage: 0, Calls: 0, Compliance: 0, Chemist_Calls: 0 };
+        for (const ch of Object.values(children)) {
+          for (const [prod, val] of Object.entries(ch.salesByProduct || {})) {
+            agg.salesByProduct[prod] = (agg.salesByProduct[prod] || 0) + (val || 0);
+          }
 
-      for (const key of childKeys) {
-        const child = node.children[key];
-        const { amount, salesByProduct, metrics } = computeAggregates(child);
-        sumAmount += amount;
-        count++;
-
-        // merge sales
-        for (const [prod, val] of Object.entries(salesByProduct)) {
-          aggregatedSales[prod] = (aggregatedSales[prod] || 0) + val;
+          agg.totalSales += ch.totalSales || 0;
+          agg.Coverage.push(ch.Coverage || 0);
+          agg.Calls.push(ch.Calls || 0);
+          agg.Compliance.push(ch.Compliance || 0);
+          agg.Chemist_Calls.push(ch.Chemist_Calls || 0);
         }
 
-        // sum metrics
-        metricsSum.Coverage += metrics.Coverage;
-        metricsSum.Calls += metrics.Calls;
-        metricsSum.Compliance += metrics.Compliance;
-        metricsSum.Chemist_Calls += metrics.Chemist_Calls;
+        node.sales = Object.entries(agg.salesByProduct).map(([k, v]) => ({
+          productName: k,
+          sales: v,
+        }));
+        node.salesByProduct = agg.salesByProduct;
+        node.totalSales = agg.totalSales;
+        node.Coverage = Math.round(avg(agg.Coverage));
+        node.Calls = Math.round(avg(agg.Calls));
+        node.Compliance = Math.round(avg(agg.Compliance));
+        node.Chemist_Calls = Math.round(avg(agg.Chemist_Calls));
       }
 
-      node.amount = count > 0 ? Math.round(sumAmount / count) : 0;
-      node.salesByProduct = aggregatedSales;
-      node.totalSales = Object.values(aggregatedSales).reduce((a, b) => a + b, 0);
-
-      // average metrics for managers
-      node.Coverage = count > 0 ? Math.round(metricsSum.Coverage / count) : 0;
-      node.Calls = count > 0 ? Math.round(metricsSum.Calls / count) : 0;
-      node.Compliance = count > 0 ? Math.round(metricsSum.Compliance / count) : 0;
-      node.Chemist_Calls = count > 0 ? Math.round(metricsSum.Chemist_Calls / count) : 0;
-
-      return {
-        amount: node.amount,
-        salesByProduct: aggregatedSales,
-        metrics: {
-          Coverage: node.Coverage,
-          Calls: node.Calls,
-          Compliance: node.Compliance,
-          Chemist_Calls: node.Chemist_Calls,
-        },
-      };
+      return node;
     }
 
-    Object.values(root).forEach(r => computeAggregates(r));
+    const allTerritories = rows.map((r) => r.Territory);
+    const topLevels = rows.filter((r) => !allTerritories.includes(r.Area_Name));
 
-    res.json(root);
+    const hierarchy = {};
+    if (territory) {
+      const node = buildNode(territory);
+      if (node) hierarchy[territory] = node;
+    } else {
+      for (const top of topLevels) {
+        const node = buildNode(top.Territory);
+        if (node) hierarchy[top.Territory] = node;
+      }
+    }
+
+    res.json(hierarchy);
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Error fetching hierarchy");
+    console.error("❌ Error:", err);
+    res.status(500).send("Server error: " + err.message);
   }
 });
+
+
+
 
 
 
@@ -303,6 +243,31 @@ app.post('/putData', async (req, res) => {
     return res.status(500).send('Internal Server Error');
   }
 });
+app.post('/dashboardData', async (req, res) => {
+  try {
+    const { Territory } = req.body; // 👈 Get Territory from frontend
+    
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT * FROM dashboard1 WHERE Territory = ?`,
+      [Territory] // 👈 Pass safely to prevent SQL injection
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No record found for this Territory" });
+    }
+
+    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
 app.post("/hierarchy-kpi", async (req, res) => {
   try {
     const { empterr } = req.body;
@@ -732,7 +697,7 @@ app.post('/getTable1', async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT stockistname, ProductName, Sales 
-       FROM sales_data 
+       FROM sales_data_testing_7 
        WHERE Territory = ?`,
       [territory]
     );
@@ -754,7 +719,7 @@ app.post('/getTable2', async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT stockistname, ProductName, Sales 
-       FROM sales_data
+       FROM sales_data_testing_7
        WHERE Territory = ?`,
       [territory]
     );
