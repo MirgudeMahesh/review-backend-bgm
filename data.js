@@ -60,7 +60,7 @@ app.post("/hierarchy", async (req, res) => {
   try {
     const { territory } = req.body || {};
 
-    const [rows] = await pool.query("SELECT * FROM hierarchy_metrics_agg1");
+    const [rows] = await pool.query("SELECT * FROM hierarchy_metrics_agg_rm");
     if (!rows.length) return res.json({ message: "No data found" });
 
     // ✅ Safely parse and preserve sales_by_product
@@ -195,6 +195,7 @@ app.get('/employees', async (req, res) => {
 });
 
 // ---------- Commitments insert ----------
+
 app.post('/putData', async (req, res) => {
   try {
     const dataToInsert = req.body;
@@ -391,7 +392,15 @@ app.post("/hierarchy-kpi", async (req, res) => {
   }
 });
 
+
+
+
+
+
+
 // ---------- Escalations insert ----------
+
+
 app.post('/putEscalations', async (req, res) => {
   try {
     const dataToInsert = req.body;
@@ -431,94 +440,81 @@ app.post('/putEscalations', async (req, res) => {
   }
 });
 
+  // ------------------------------------temporary regarding only be data
+
 // ---------- Get commitments by territory ----------
-app.get('/getData/:receiver_territory', async (req, res) => {
+app.get("/getData/:territory", async (req, res) => {
   try {
-    const { receiver_territory } = req.params;
-    if (!receiver_territory) {
-      return res.status(400).send('receiver_territory is required');
-    }
+    const territory = req.params.territory;
 
-    const query = `
-      SELECT 
-        metric,
-        sender,
-        sender_code,
-        sender_territory,
-        receiver,
-        receiver_code,
-        receiver_territory,
-        goal,
-        received_date,
-        goal_date,
-        receiver_commit_date,
-        commitment
-      FROM commitments
-      WHERE receiver_territory = ?
-    `;
-    const [rows] = await pool.query(query, [receiver_territory]);
+    const [rows] = await pool.query(
+      `SELECT id, metric, sender, sender_territory, receiver_territory, 
+              commitment, goal, received_date, goal_date, receiver_commit_date
+       FROM commitments
+       WHERE receiver_territory = ?`,
+      [territory]
+    );
 
-    if (rows.length === 0) {
-  return res.status(200).json([]);  // ✅ return empty array instead of 404
-    }
-    return res.status(200).json(rows);
+    res.json(rows);
   } catch (err) {
-    console.error('Error /getData:', err);
-    return res.status(500).send('Internal Server Error');
+    console.error("Error fetching commitments:", err);
+    res.status(500).send("Server error");
   }
 });
+
 
 // ---------- Update receiver commit date ----------
 app.put('/updateCommitment', async (req, res) => {
   try {
-    const { metric, sender_territory, receiver_territory, receiver_commit_date, goal } = req.body;
+    const { id, receiver_commit_date, goal } = req.body;
 
-    if (!metric || !sender_territory || !receiver_territory) {
-      return res.status(400).send('metric, sender_territory, and receiver_territory are required');
+    if (!id) {
+      return res.status(400).send("Row ID is required");
     }
 
-    // Build dynamic query fields
     const fields = [];
     const values = [];
 
     if (receiver_commit_date !== undefined) {
-      fields.push('receiver_commit_date = ?');
+      fields.push("receiver_commit_date = ?");
       values.push(receiver_commit_date);
     }
 
     if (goal !== undefined) {
-      fields.push('goal = ?');
+      fields.push("goal = ?");
       values.push(goal);
     }
 
     if (fields.length === 0) {
-      return res.status(400).send('Nothing to update');
+      return res.status(400).send("Nothing to update");
     }
 
-    values.push(metric, sender_territory, receiver_territory);
+    values.push(id);
 
     const query = `
       UPDATE commitments
-      SET ${fields.join(', ')}
-      WHERE metric = ? AND sender_territory = ? AND receiver_territory = ?
+      SET ${fields.join(", ")}
+      WHERE id = ?
     `;
 
     const [result] = await pool.query(query, values);
 
     if (result.affectedRows === 0) {
-      return res.status(404).send('No matching commitment found');
+      return res.status(404).send("No row found with this id");
     }
 
-    res.status(200).send('Commitment updated successfully');
+    res.status(200).send("Updated successfully");
   } catch (err) {
-    console.error('Error /updateCommitment:', err);
-    res.status(500).send('Internal Server Error');
+    console.error("Error /updateCommitment:", err);
+    res.status(500).send("Internal Server Error");
   }
 });
 
 
 
+
 // ---------- Add disclosure ----------
+
 app.post("/addEscalation", async (req, res) => {
   try {
     const {
@@ -560,6 +556,7 @@ app.post("/addEscalation", async (req, res) => {
   }
 });
 // 📌 Get all information records
+
 app.get('/getInfo', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM information ORDER BY received_date DESC');
@@ -569,6 +566,8 @@ app.get('/getInfo', async (req, res) => {
     res.status(500).send('Internal Server Error');
   }
 });
+
+
 
 // ---------- Insert info ----------
 app.post('/putInfo', async (req, res) => {
@@ -744,92 +743,93 @@ app.post('/getTable2', async (req, res) => {
 
 // ---------- AI Assistant Route ----------
 
+  // ------------------------------------temporary regarding only be data
 
 
-app.post('/api/ask-ai', async (req, res) => {
-    // NOTE: 'pool' is assumed to be the connected MySQL pool instance.
-    const { question, table } = req.body;
+// app.post('/api/ask-ai', async (req, res) => {
+//     // NOTE: 'pool' is assumed to be the connected MySQL pool instance.
+//     const { question, table } = req.body;
 
-    // 1) Basic validation
-    if (!question || question.trim() === '') {
-        return res.status(400).json({ error: 'Question cannot be empty' });
-    }
-    if (!table || table.trim() === '') {
-        return res.status(400).json({ error: 'Table name is required' });
-    }
+//     // 1) Basic validation
+//     if (!question || question.trim() === '') {
+//         return res.status(400).json({ error: 'Question cannot be empty' });
+//     }
+//     if (!table || table.trim() === '') {
+//         return res.status(400).json({ error: 'Table name is required' });
+//     }
 
-    // 2) Whitelist allowed tables to prevent SQL injection on identifier
-    const allowedTables = ['employee_details', 'commitments', 'dashboard1'];
-    if (!allowedTables.includes(table)) {
-        return res.status(400).json({ error: 'Invalid table selected.' });
-    }
+//     // 2) Whitelist allowed tables to prevent SQL injection on identifier
+//     const allowedTables = ['employee_details', 'commitments', 'dashboard1'];
+//     if (!allowedTables.includes(table)) {
+//         return res.status(400).json({ error: 'Invalid table selected.' });
+//     }
 
-    try {
-        // 3) Fetch all columns safely (identifier placeholder)
-        // This line assumes 'pool' is an active database connection pool (e.g., from mysql2/promise)
-        const [rows] = await pool.query('SELECT * FROM ??', [table]);
+//     try {
+//         // 3) Fetch all columns safely (identifier placeholder)
+//         // This line assumes 'pool' is an active database connection pool (e.g., from mysql2/promise)
+//         const [rows] = await pool.query('SELECT * FROM ??', [table]);
 
-        if (!rows || rows.length === 0) {
-            return res.json({ answer: `No data found in ${table}.` });
-        }
+//         if (!rows || rows.length === 0) {
+//             return res.json({ answer: `No data found in ${table}.` });
+//         }
 
-        // 4) Convert rows to readable text for AI (cap volume to protect token usage)
-        const maxRows = 200;
-        const limited = rows.slice(0, maxRows);
-        const formattedData = limited.map(r => JSON.stringify(r)).join('\n');
+//         // 4) Convert rows to readable text for AI (cap volume to protect token usage)
+//         const maxRows = 1000;
+//         const limited = rows.slice(0, maxRows);
+//         const formattedData = limited.map(r => JSON.stringify(r)).join('\n');
 
-        // 5) Build Gemini payload
-        const systemPrompt = `You are a data analyst. Answer using only the provided data from table: ${table}. If the question cannot be answered from the data, say so.`;
-        const userQuery = `Here is the ${table} data (first ${limited.length} of ${rows.length} rows):\n${formattedData}\n\nQuestion: ${question}`;
+//         // 5) Build Gemini payload
+//         const systemPrompt = `You are a data analyst. Answer using only the provided data from table: ${table}. If the question cannot be answered from the data, say so.`;
+//         const userQuery = `Here is the ${table} data (first ${limited.length} of ${rows.length} rows):\n${formattedData}\n\nQuestion: ${question}`;
 
-        const payload = {
-            // User query goes into the contents array
-            contents: [{ parts: [{ text: userQuery }] }],
+//         const payload = {
+//             // User query goes into the contents array
+//             contents: [{ parts: [{ text: userQuery }] }],
 
-            // System instructions guide the model's behavior and persona
-            systemInstruction: {
-                parts: [{ text: systemPrompt }]
-            },
+//             // System instructions guide the model's behavior and persona
+//             systemInstruction: {
+//                 parts: [{ text: systemPrompt }]
+//             },
 
-            // Other generation configuration (optional, but good practice)
-            generationConfig: {
-                temperature: 0.2
-            }
-        };
+//             // Other generation configuration (optional, but good practice)
+//             generationConfig: {
+//                 temperature: 0.2
+//             }
+//         };
 
-        // 6) Call Gemini API (using the pre-configured URL)
-        const response = await fetch(GEMINI_API_URL, {
-            method: 'POST',
-            headers: {
-                // No Authorization header needed; key is in the query string
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(payload),
-        });
+//         // 6) Call Gemini API (using the pre-configured URL)
+//         const response = await fetch(GEMINI_API_URL, {
+//             method: 'POST',
+//             headers: {
+//                 // No Authorization header needed; key is in the query string
+//                 'Content-Type': 'application/json',
+//             },
+//             body: JSON.stringify(payload),
+//         });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Gemini API error response:', errorText);
-            // Attempt to parse JSON error if possible, otherwise send raw text
-            try {
-                const errorData = JSON.parse(errorText);
-                return res.status(response.status).json({ error: errorData.error?.message || 'Gemini API returned an error.' });
-            } catch {
-                return res.status(response.status).json({ error: 'Gemini API returned an unknown error: ' + errorText });
-            }
-        }
+//         if (!response.ok) {
+//             const errorText = await response.text();
+//             console.error('Gemini API error response:', errorText);
+//             // Attempt to parse JSON error if possible, otherwise send raw text
+//             try {
+//                 const errorData = JSON.parse(errorText);
+//                 return res.status(response.status).json({ error: errorData.error?.message || 'Gemini API returned an error.' });
+//             } catch {
+//                 return res.status(response.status).json({ error: 'Gemini API returned an unknown error: ' + errorText });
+//             }
+//         }
 
-        const data = await response.json();
+//         const data = await response.json();
 
-        // Extract the generated text from the Gemini response structure
-        const answer = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No answer available.';
+//         // Extract the generated text from the Gemini response structure
+//         const answer = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No answer available.';
 
-        res.json({ answer });
-    } catch (err) {
-        console.error('❌ ask-ai error:', err);
-        res.status(500).json({ error: 'AI query failed due to an internal server error.' });
-    }
-});
+//         res.json({ answer });
+//     } catch (err) {
+//         console.error('❌ ask-ai error:', err);
+//         res.status(500).json({ error: 'AI query failed due to an internal server error.' });
+//     }
+// });
 
 
 // ---------- Start server ----------
