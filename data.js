@@ -8,31 +8,100 @@ const path = require('path');
 
 const app = express();
 
-const GEMINI_API_KEY = "AIzaSyATNAvqNh49YuO5ECjn6TR-BcaAFjNC3Ws";
-const GEMINI_API_MODEL = 'gemini-2.5-flash-preview-05-20';
-const GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
-const GEMINI_API_URL = `${GEMINI_API_BASE_URL}/${GEMINI_API_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-// ---------- CORS ----------
-// Use FRONTEND_ORIGIN in production; fallback to localhost for local dev
-const FRONTEND_ORIGIN = ['http://localhost:3000', 'http://192.168.0.157:3000'];
+// const GEMINI_API_KEY = "AIzaSyATNAvqNh49YuO5ECjn6TR-BcaAFjNC3Ws";
+// const GEMINI_API_MODEL = 'gemini-2.5-flash-preview-05-20';
+// const GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+// const GEMINI_API_URL = `${GEMINI_API_BASE_URL}/${GEMINI_API_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+// // ---------- CORS ----------
+// // Use FRONTEND_ORIGIN in production; fallback to localhost for local dev
+// const FRONTEND_ORIGIN = ['http://localhost:3000', 'http://192.168.0.157:3000'];
+// app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
+// app.use(express.json());
+
+// // ---------- LOCAL DB pool (no env) ----------
+// let pool;
+
+// try {
+//   pool = mysql.createPool({
+//     host: 'localhost',
+//     port: 3306,
+//     user: 'root',
+//     password: 'root',
+//     database: 'pulse_new',
+//     waitForConnections: true,
+//     connectionLimit: 20,
+//   });
+
+//   console.log('💻 Using LOCAL MySQL (pulse_new @ localhost)');
+// } catch (err) {
+//   console.error('❌ Error creating DB pool:', err);
+//   process.exit(1);
+// }
+
+// // Test connection
+// pool.getConnection()
+//   .then(conn => {
+//     console.log('✅ MySQL connected to local successfully!');
+//     conn.release();
+//   })
+//   .catch(err => {
+//     console.error('❌ Failed to connect to local MySQL:', err.message);
+//     process.exit(1);
+//   });
+
+// // ---------- Health check ----------
+// app.get('/healthz', (_, res) => res.send('ok'));
+
+
+// ---------- Helper: computeAggregates ----------
+// ---------- Hierarchy Route (Fixed) ----------
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
 app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json());
 
-// ---------- LOCAL DB pool (no env) ----------
+// ---------- DB pool (supports DATABASE_URL or individual env vars) ----------
 let pool;
 
 try {
-  pool = mysql.createPool({
-    host: 'localhost',
-    port: 3306,
-    user: 'root',
-    password: 'root',
-    database: 'pulse_new',
-    waitForConnections: true,
-    connectionLimit: 20,
-  });
+  let sslOptions;
+  if (process.env.DB_SSL === 'true') {
+    const certPath = path.resolve(__dirname, 'certs', 'aiven-ca.pem');
+    if (fs.existsSync(certPath)) {
+      sslOptions = {
+        ca: fs.readFileSync(certPath),
+        rejectUnauthorized: true,
+      };
+      console.log('🔐 Using Aiven CA certificate for SSL');
+    } else {
+      sslOptions = { rejectUnauthorized: true };
+      console.log('🔐 Using default SSL (no CA file found)');
+    }
+  }
 
-  console.log('💻 Using LOCAL MySQL (pulse_new @ localhost)');
+  if (process.env.DATABASE_URL) {
+    const dbUrl = new URL(process.env.DATABASE_URL);
+    pool = mysql.createPool({
+      host: dbUrl.hostname,
+      port: dbUrl.port ? Number(dbUrl.port) : 3306,
+      user: decodeURIComponent(dbUrl.username),
+      password: decodeURIComponent(dbUrl.password),
+      database: dbUrl.pathname.replace('/', ''),
+      waitForConnections: true,
+      connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 50),
+      ssl: sslOptions,
+    });
+  } else {
+    pool = mysql.createPool({
+      host: process.env.DB_HOST || 'localhost',
+      port: Number(process.env.DB_PORT || 3306),
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || 'root',
+      database: process.env.DB_NAME || 'pulse_new',
+      waitForConnections: true,
+      connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 50),
+      ssl: sslOptions,
+    });
+  }
 } catch (err) {
   console.error('❌ Error creating DB pool:', err);
   process.exit(1);
@@ -41,20 +110,17 @@ try {
 // Test connection
 pool.getConnection()
   .then(conn => {
-    console.log('✅ MySQL connected to local successfully!');
+    console.log('✅ MySQL connected to Aiven successfully!');
     conn.release();
   })
   .catch(err => {
-    console.error('❌ Failed to connect to local MySQL:', err.message);
+    console.error('❌ Failed to connect to Aiven MySQL:', err.message);
     process.exit(1);
   });
 
 // ---------- Health check ----------
 app.get('/healthz', (_, res) => res.send('ok'));
 
-
-// ---------- Helper: computeAggregates ----------
-// ---------- Hierarchy Route (Fixed) ----------
 
 app.post("/hierarchy", async (req, res) => {
   try {
@@ -833,7 +899,10 @@ app.post('/getTable2', async (req, res) => {
 
 
 // ---------- Start server ----------
+// const PORT = process.env.PORT || 8000;
+// app.listen(PORT, '0.0.0.0', () => {
+//   console.log(`Backend server running on http://0.0.0.0:${PORT}`);
+// });
+
 const PORT = process.env.PORT || 8000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Backend server running on http://0.0.0.0:${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
