@@ -132,23 +132,12 @@ app.post("/hierarchy", async (req, res) => {
     const [rows] = await pool.query("SELECT * FROM hierarchy_metrics_agg_rm");
     if (!rows.length) return res.json({ message: "No data found" });
 
-    // ✅ Safely parse and preserve sales_by_product
-    for (const r of rows) {
-      if (r.sales_by_product && typeof r.sales_by_product === "string") {
-        try {
-          r.sales_by_product = JSON.parse(r.sales_by_product.trim());
-        } catch {
-          r.sales_by_product = {};
-        }
-      } else if (typeof r.sales_by_product !== "object" || r.sales_by_product === null) {
-        r.sales_by_product = {};
-      }
-    }
-
+    // Map by territory
     const byTerritory = {};
     rows.forEach((r) => (byTerritory[r.Territory] = r));
 
-    const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + (b || 0), 0) / arr.length : 0);
+    const avg = (arr) =>
+      arr.length ? arr.reduce((a, b) => a + (b || 0), 0) / arr.length : 0;
 
     function buildNode(terr) {
       const emp = byTerritory[terr];
@@ -164,29 +153,23 @@ app.post("/hierarchy", async (req, res) => {
         if (childNode) children[c.Territory] = childNode;
       }
 
+      // Node WITHOUT ANY SALES DATA
       let node = {
         empName: emp.Emp_Name,
-        amount: 0,
         territory: emp.Territory,
         role: emp.Role,
         children,
-        // ✅ sales (array) comes BEFORE salesByProduct
-        sales: Object.entries(emp.sales_by_product || {}).map(([k, v]) => ({
-          productName: k,
-          sales: v,
-        })),
-        salesByProduct: emp.sales_by_product || {},
-        totalSales: parseFloat(emp.total_sales) || 0,
         Coverage: emp.Coverage ? parseFloat(emp.Coverage) : 0,
         Calls: emp.Calls ? parseFloat(emp.Calls) : 0,
         Compliance: emp.Compliance ? parseFloat(emp.Compliance) : 0,
-        Chemist_Calls: emp.Chemist_Calls ? parseFloat(emp.Chemist_Calls) : 0,
+        Chemist_Calls: emp.Chemist_Calls
+          ? parseFloat(emp.Chemist_Calls)
+          : 0,
       };
 
+      // Aggregate ONLY non-sales fields
       if (Object.keys(children).length > 0) {
         const agg = {
-          salesByProduct: {},
-          totalSales: 0,
           Coverage: [],
           Calls: [],
           Compliance: [],
@@ -194,23 +177,12 @@ app.post("/hierarchy", async (req, res) => {
         };
 
         for (const ch of Object.values(children)) {
-          for (const [prod, val] of Object.entries(ch.salesByProduct || {})) {
-            agg.salesByProduct[prod] = (agg.salesByProduct[prod] || 0) + (val || 0);
-          }
-
-          agg.totalSales += ch.totalSales || 0;
           agg.Coverage.push(ch.Coverage || 0);
           agg.Calls.push(ch.Calls || 0);
           agg.Compliance.push(ch.Compliance || 0);
           agg.Chemist_Calls.push(ch.Chemist_Calls || 0);
         }
 
-        node.sales = Object.entries(agg.salesByProduct).map(([k, v]) => ({
-          productName: k,
-          sales: v,
-        }));
-        node.salesByProduct = agg.salesByProduct;
-        node.totalSales = agg.totalSales;
         node.Coverage = Math.round(avg(agg.Coverage));
         node.Calls = Math.round(avg(agg.Calls));
         node.Compliance = Math.round(avg(agg.Compliance));
@@ -240,7 +212,6 @@ app.post("/hierarchy", async (req, res) => {
     res.status(500).send("Server error: " + err.message);
   }
 });
-
 
 
 
