@@ -122,6 +122,9 @@ pool.getConnection()
 app.get('/healthz', (_, res) => res.send('ok'));
 
 
+// ---------- Helper: computeAggregates ----------
+// ---------- Hierarchy Route (Fixed) ----------
+
 app.post("/hierarchy", async (req, res) => {
   try {
     const { territory } = req.body || {};
@@ -250,7 +253,7 @@ app.get('/employees', async (req, res) => {
   try {
     const [rows] = await pool.query(`
       SELECT Emp_Name AS name, Role, Emp_Code, Territory 
-      FROM employee_details
+      FROM organogram
       ORDER BY Emp_Name
     `);
     res.json(rows);
@@ -319,7 +322,7 @@ app.post('/dashboardData', async (req, res) => {
     }
 
     const [rows] = await pool.query(
-      `SELECT * FROM dashboard1 WHERE Territory = ?`,
+      `SELECT * FROM bgm_be_dashboard_ftm_202511201121 WHERE Territory = ?`,
       [Territory] // 👈 Pass safely to prevent SQL injection
     );
 
@@ -333,130 +336,262 @@ app.post('/dashboardData', async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
-
-app.post("/hierarchy-kpi", async (req, res) => {
+app.post('/dashboardytdData', async (req, res) => {
   try {
-    const { empterr } = req.body;
-    if (!empterr) return res.status(400).send("empterr is required");
+    const { Territory } = req.body; // 👈 Get Territory from frontend
+    
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
 
-    // 1. Build hierarchy using recursive CTE
     const [rows] = await pool.query(
-      `
-      WITH RECURSIVE downline AS (
-        SELECT Emp_Code, Emp_Name, Reporting_Manager, Reporting_Manager_Code, Role, Territory, Area_Name
-        FROM employee_details
-        WHERE Territory = ?
-        UNION ALL
-        SELECT e.Emp_Code, e.Emp_Name, e.Reporting_Manager, e.Reporting_Manager_Code, e.Role, e.Territory, e.Area_Name
-        FROM employee_details e
-        INNER JOIN downline d ON e.Area_Name = d.Territory
-      )
-      SELECT * FROM downline
-      `,
-      [empterr]
+      `SELECT * FROM bgm_be_dashboard_ytd WHERE Territory = ?`,
+      [Territory] // 👈 Pass safely to prevent SQL injection
     );
 
-    if (!rows.length) return res.json({});
-
-    // 2. Fetch KPI values for BE's from dashboard1
-    const territories = rows.map(r => r.Territory);
-    let kpiByTerritory = {};
-    if (territories.length > 0) {
-      const [kpiRows] = await pool.query(
-        `
-        SELECT Territory, Calls, Coverage, Compliance, Chemist_Calls
-        FROM dashboard1
-        WHERE Territory IN (?)
-        `,
-        [territories]
-      );
-
-      kpiByTerritory = kpiRows.reduce((acc, r) => {
-        acc[r.Territory] = {
-          Calls: r.Calls || 0,
-          Coverage: r.Coverage || 0,
-          Compliance: r.Compliance || 0,
-          Chemist_Calls: r.Chemist_Calls || 0,
-        };
-        return acc;
-      }, {});
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No record found for this Territory" });
     }
 
-    // 3. Build map keyed by territory
-    const map = {};
-    rows.forEach(r => {
-      map[r.Territory] = {
-        empName: r.Emp_Name,
-        role: r.Role,
-        territory: r.Territory,
-        metrics: (r.Role === "BE" ||r.Role==='TE') ? (kpiByTerritory[r.Territory] || {
-          Calls: 0,
-          Coverage: 0,
-          Compliance: 0,
-          Chemist_Calls: 0
-        }) : { Calls: 0, Coverage: 0, Compliance: 0, Chemist_Calls: 0 },
-        children: {}
-      };
-    });
-
-    // 4. Link children to their parent
-    let root = {};
-    rows.forEach(r => {
-      if (r.Territory === empterr) {
-        root[r.Territory] = map[r.Territory];
-      } else if (r.Area_Name) {
-        const parent = rows.find(p => p.Territory === r.Area_Name);
-        if (parent && map[parent.Territory]) {
-          map[parent.Territory].children[r.Territory] = map[r.Territory];
-        }
-      }
-    });
-
-    // 5. Compute averages bottom-up (direct child averaging)
-    function computeAverages(node) {
-      const childKeys = Object.keys(node.children);
-
-      if (childKeys.length === 0) {
-        // BE → already has values
-        return { ...node.metrics, count: 1 };
-      }
-
-      let totals = { Calls: 0, Coverage: 0, Compliance: 0, Chemist_Calls: 0 };
-      let childCount = 0;
-
-      for (const key of childKeys) {
-        const child = node.children[key];
-        const childAgg = computeAverages(child);
-
-        // Aggregate based on **child metrics**, not leaves
-        totals.Calls += child.metrics.Calls;
-        totals.Coverage += child.metrics.Coverage;
-        totals.Compliance += child.metrics.Compliance;
-        totals.Chemist_Calls += child.metrics.Chemist_Calls;
-
-        childCount++;
-      }
-
-      // Average across direct children
-      node.metrics = {
-        Calls: childCount > 0 ? Math.round(totals.Calls / childCount) : 0,
-        Coverage: childCount > 0 ? Math.round(totals.Coverage / childCount) : 0,
-        Compliance: childCount > 0 ? Math.round(totals.Compliance / childCount) : 0,
-        Chemist_Calls: childCount > 0 ? Math.round(totals.Chemist_Calls / childCount) : 0,
-      };
-
-      return { ...totals, count: childCount };
-    }
-
-    Object.values(root).forEach(r => computeAverages(r));
-
-    res.json(root);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Error fetching KPI hierarchy");
+    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
+app.post('/dashboardYTD', async (req, res) => {
+  try {
+    const { Territory } = req.body;
+
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT 
+         Calls_Score,
+         RCPA_Score,
+         Coverage_Score,
+         Compliance_Score,
+         Activity_Implementation_Score,
+         Secondary_Sales_growth_Score,
+         MSR_Achievement_Score,
+         RX_Growth_Score,
+         Brand_Performance_Index_Score
+       FROM bgm_be_dashboard_ytd
+       WHERE Territory = ?`,
+      [Territory]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No record found for this Territory" });
+    }
+
+    const row = rows[0];
+
+    // First set
+    const totalScore1 =
+      (row.Calls_Score || 0) +
+      (row.RCPA_Score || 0) +
+      (row.Coverage_Score || 0) +
+      (row.Compliance_Score || 0) +
+      (row.Activity_Implementation_Score || 0);
+
+    // Second set
+    const totalScore2 =
+      (row.Secondary_Sales_growth_Score || 0) +
+      (row.MSR_Achievement_Score || 0) +
+      (row.RX_Growth_Score || 0) +
+      (row.Brand_Performance_Index_Score || 0);
+
+    res.json({
+      totalScore1: Number(totalScore1.toFixed(2)),
+      totalScore2: Number(totalScore2.toFixed(2))
+    });
+
+  } catch (error) {
+    console.error("Error fetching YTD data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+app.post('/dashboardFTD', async (req, res) => {
+  try {
+    const { Territory } = req.body;
+
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT 
+         Calls_Score,
+         RCPA_Score,
+         Coverage_Score,
+         Compliance_Score,
+         Activity_Implementation_Score,
+         Secondary_Sales_growth_Score,
+         MSR_Achievement_Score,
+         RX_Growth_Score,
+         Brand_Performance_Index_Score
+       FROM bgm_be_dashboard_ftm
+       WHERE Territory = ?`,
+      [Territory]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No record found for this Territory" });
+    }
+
+    const row = rows[0];
+
+    // First set
+    const totalScore3 =
+      (row.Calls_Score || 0) +
+      (row.RCPA_Score || 0) +
+      (row.Coverage_Score || 0) +
+      (row.Compliance_Score || 0) +
+      (row.Activity_Implementation_Score || 0);
+
+    // Second set
+    const totalScore4 =
+      (row.Secondary_Sales_growth_Score || 0) +
+      (row.MSR_Achievement_Score || 0) +
+      (row.RX_Growth_Score || 0) +
+      (row.Brand_Performance_Index_Score || 0);
+
+    res.json({
+      totalScore3: Number(totalScore3.toFixed(2)),
+      totalScore4: Number(totalScore4.toFixed(2))
+    });
+
+  } catch (error) {
+    console.error("Error fetching YTD data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// app.post("/hierarchy-kpi", async (req, res) => {
+//   try {
+//     const { empterr } = req.body;
+//     if (!empterr) return res.status(400).send("empterr is required");
+
+//     // 1. Build hierarchy using recursive CTE
+//     const [rows] = await pool.query(
+//       `
+//       WITH RECURSIVE downline AS (
+//         SELECT Emp_Code, Emp_Name, Reporting_Manager, Reporting_Manager_Code, Role, Territory, Area_Name
+//         FROM employee_details
+//         WHERE Territory = ?
+//         UNION ALL
+//         SELECT e.Emp_Code, e.Emp_Name, e.Reporting_Manager, e.Reporting_Manager_Code, e.Role, e.Territory, e.Area_Name
+//         FROM employee_details e
+//         INNER JOIN downline d ON e.Area_Name = d.Territory
+//       )
+//       SELECT * FROM downline
+//       `,
+//       [empterr]
+//     );
+
+//     if (!rows.length) return res.json({});
+
+//     // 2. Fetch KPI values for BE's from dashboard1
+//     const territories = rows.map(r => r.Territory);
+//     let kpiByTerritory = {};
+//     if (territories.length > 0) {
+//       const [kpiRows] = await pool.query(
+//         `
+//         SELECT Territory, Calls, Coverage, Compliance, Chemist_Calls
+//         FROM dashboard1
+//         WHERE Territory IN (?)
+//         `,
+//         [territories]
+//       );
+
+//       kpiByTerritory = kpiRows.reduce((acc, r) => {
+//         acc[r.Territory] = {
+//           Calls: r.Calls || 0,
+//           Coverage: r.Coverage || 0,
+//           Compliance: r.Compliance || 0,
+//           Chemist_Calls: r.Chemist_Calls || 0,
+//         };
+//         return acc;
+//       }, {});
+//     }
+
+//     // 3. Build map keyed by territory
+//     const map = {};
+//     rows.forEach(r => {
+//       map[r.Territory] = {
+//         empName: r.Emp_Name,
+//         role: r.Role,
+//         territory: r.Territory,
+//         metrics: (r.Role === "BE" ||r.Role==='TE') ? (kpiByTerritory[r.Territory] || {
+//           Calls: 0,
+//           Coverage: 0,
+//           Compliance: 0,
+//           Chemist_Calls: 0
+//         }) : { Calls: 0, Coverage: 0, Compliance: 0, Chemist_Calls: 0 },
+//         children: {}
+//       };
+//     });
+
+//     // 4. Link children to their parent
+//     let root = {};
+//     rows.forEach(r => {
+//       if (r.Territory === empterr) {
+//         root[r.Territory] = map[r.Territory];
+//       } else if (r.Area_Name) {
+//         const parent = rows.find(p => p.Territory === r.Area_Name);
+//         if (parent && map[parent.Territory]) {
+//           map[parent.Territory].children[r.Territory] = map[r.Territory];
+//         }
+//       }
+//     });
+
+//     // 5. Compute averages bottom-up (direct child averaging)
+//     function computeAverages(node) {
+//       const childKeys = Object.keys(node.children);
+
+//       if (childKeys.length === 0) {
+//         // BE → already has values
+//         return { ...node.metrics, count: 1 };
+//       }
+
+//       let totals = { Calls: 0, Coverage: 0, Compliance: 0, Chemist_Calls: 0 };
+//       let childCount = 0;
+
+//       for (const key of childKeys) {
+//         const child = node.children[key];
+//         const childAgg = computeAverages(child);
+
+//         // Aggregate based on **child metrics**, not leaves
+//         totals.Calls += child.metrics.Calls;
+//         totals.Coverage += child.metrics.Coverage;
+//         totals.Compliance += child.metrics.Compliance;
+//         totals.Chemist_Calls += child.metrics.Chemist_Calls;
+
+//         childCount++;
+//       }
+
+//       // Average across direct children
+//       node.metrics = {
+//         Calls: childCount > 0 ? Math.round(totals.Calls / childCount) : 0,
+//         Coverage: childCount > 0 ? Math.round(totals.Coverage / childCount) : 0,
+//         Compliance: childCount > 0 ? Math.round(totals.Compliance / childCount) : 0,
+//         Chemist_Calls: childCount > 0 ? Math.round(totals.Chemist_Calls / childCount) : 0,
+//       };
+
+//       return { ...totals, count: childCount };
+//     }
+
+//     Object.values(root).forEach(r => computeAverages(r));
+
+//     res.json(root);
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).send("Error fetching KPI hierarchy");
+//   }
+// });
 
 
 
@@ -784,7 +919,7 @@ app.post('/getTable2', async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT stockistname, ProductName, Sales 
-       FROM sales_data_testing_7
+       FROM sales_data
        WHERE Territory = ?`,
       [territory]
     );
@@ -899,10 +1034,5 @@ app.post('/getTable2', async (req, res) => {
 
 
 // ---------- Start server ----------
-// const PORT = process.env.PORT || 8000;
-// app.listen(PORT, '0.0.0.0', () => {
-//   console.log(`Backend server running on http://0.0.0.0:${PORT}`);
-// });
-
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
