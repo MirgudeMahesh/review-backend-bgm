@@ -293,7 +293,7 @@ app.post('/dashboardData', async (req, res) => {
     }
 
     const [rows] = await pool.query(
-      `SELECT * FROM bgm_be_dashboard_ftm_202511201121 WHERE Territory = ?`,
+      `SELECT * FROM bgm_be_dashboard_ftm WHERE Territory = ?`,
       [Territory] // 👈 Pass safely to prevent SQL injection
     );
 
