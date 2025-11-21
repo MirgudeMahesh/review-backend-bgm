@@ -364,19 +364,19 @@ app.post('/dashboardYTD', async (req, res) => {
     const row = rows[0];
 
     // First set
-    const totalScore1 =
-      (row.Calls_Score || 0) +
-      (row.RCPA_Score || 0) +
-      (row.Coverage_Score || 0) +
-      (row.Compliance_Score || 0) +
-      (row.Activity_Implementation_Score || 0);
+   const totalScore1 =(
+  (Number(row.Calls_Score) || 0) +
+  (Number(row.RCPA_Score) || 0) +
+  (Number(row.Coverage_Score) || 0) +
+  (Number(row.Compliance_Score) || 0) +
+  (Number(row.Activity_Implementation_Score) || 0)).toFixed(2);
 
-    // Second set
-    const totalScore2 =
-      (row.Secondary_Sales_growth_Score || 0) +
-      (row.MSR_Achievement_Score || 0) +
-      (row.RX_Growth_Score || 0) +
-      (row.Brand_Performance_Index_Score || 0);
+const totalScore2 =(
+  (Number(row.Secondary_Sales_growth_Score) || 0) +
+  (Number(row.MSR_Achievement_Score) || 0) +
+  (Number(row.RX_Growth_Score) || 0) +
+  (Number(row.Brand_Performance_Index_Score) || 0)).toFixed(2);
+
 
     res.json({
       totalScore1: Number(parseFloat(totalScore1).toFixed(2)),
@@ -421,19 +421,21 @@ app.post('/dashboardFTD', async (req, res) => {
     const row = rows[0];
 
     // First set
-    const totalScore3 =
-      (row.Calls_Score || 0) +
-      (row.RCPA_Score || 0) +
-      (row.Coverage_Score || 0) +
-      (row.Compliance_Score || 0) +
-      (row.Activity_Implementation_Score || 0);
+const totalScore3 = (
+  (Number(row.Calls_Score) || 0) +
+  (Number(row.RCPA_Score) || 0) +
+  (Number(row.Coverage_Score) || 0) +
+  (Number(row.Compliance_Score) || 0) +
+  (Number(row.Activity_Implementation_Score) || 0)
+).toFixed(2);
 
-    // Second set
-    const totalScore4 =
-      (row.Secondary_Sales_growth_Score || 0) +
-      (row.MSR_Achievement_Score || 0) +
-      (row.RX_Growth_Score || 0) +
-      (row.Brand_Performance_Index_Score || 0);
+const totalScore4 = (
+  (Number(row.Secondary_Sales_growth_Score) || 0) +
+  (Number(row.MSR_Achievement_Score) || 0) +
+  (Number(row.RX_Growth_Score) || 0) +
+  (Number(row.Brand_Performance_Index_Score) || 0)
+).toFixed(2);
+
 
     res.json({
       totalScore3: Number(parseFloat(totalScore3).toFixed(2)),
