@@ -307,6 +307,7 @@ app.post('/dashboardData', async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
 app.post('/dashboardytdData', async (req, res) => {
   try {
     const { Territory } = req.body; // 👈 Get Territory from frontend
@@ -330,6 +331,8 @@ app.post('/dashboardytdData', async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+
 app.post('/dashboardYTD', async (req, res) => {
   try {
     const { Territory } = req.body;
@@ -376,8 +379,8 @@ app.post('/dashboardYTD', async (req, res) => {
       (row.Brand_Performance_Index_Score || 0);
 
     res.json({
-      totalScore1: Number(totalScore1.toFixed(2)),
-      totalScore2: Number(totalScore2.toFixed(2))
+      totalScore1: Number(parseFloat(totalScore1).toFixed(2)),
+      totalScore2: Number(parseFloat(totalScore2).toFixed(2))
     });
 
   } catch (error) {
@@ -385,6 +388,8 @@ app.post('/dashboardYTD', async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+
 app.post('/dashboardFTD', async (req, res) => {
   try {
     const { Territory } = req.body;
@@ -431,8 +436,8 @@ app.post('/dashboardFTD', async (req, res) => {
       (row.Brand_Performance_Index_Score || 0);
 
     res.json({
-      totalScore3: Number(totalScore3.toFixed(2)),
-      totalScore4: Number(totalScore4.toFixed(2))
+      totalScore3: Number(parseFloat(totalScore3).toFixed(2)),
+      totalScore4: Number(parseFloat(totalScore4).toFixed(2))
     });
 
   } catch (error) {
