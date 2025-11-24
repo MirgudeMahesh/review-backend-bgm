@@ -234,6 +234,40 @@ app.get('/employees', async (req, res) => {
   }
 });
 
+app.get('/checkrole', async (req, res) => {
+  try {
+    const { territory } = req.query;
+
+    if (!territory) {
+      return res.status(400).json({ error: "territory is required" });
+    }
+
+    // Fetch role for the territory
+    const [rows] = await pool.query(
+      `SELECT Role FROM organogram WHERE Territory = ? LIMIT 1`,
+      [territory]
+    );
+
+    if (rows.length === 0) {
+      return res.json({ allowed: false }); // No match → false
+    }
+
+    const role = rows[0].Role;
+
+    // Allowed roles list
+    const allowedRoles = ['BE', 'KAE', 'TE', 'NE'];
+
+    // true if match, false otherwise
+    const isAllowed = allowedRoles.includes(role);
+
+    res.json({ allowed: isAllowed });
+
+  } catch (err) {
+    console.error("Error /checkrole:", err);
+    res.status(500).send("Server Error");
+  }
+});
+
 // ---------- Commitments insert ----------
 
 app.post('/putData', async (req, res) => {
