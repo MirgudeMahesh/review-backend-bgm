@@ -124,6 +124,8 @@ app.get('/healthz', (_, res) => res.send('ok'));
 
 // ---------- Helper: computeAggregates ----------
 // ---------- Hierarchy Route (Fixed) ----------
+// GET one Emp_Name by Territory
+
 
 app.post("/hierarchy", async (req, res) => {
   try {
@@ -267,7 +269,26 @@ app.get('/checkrole', async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
+app.get('/emp-name/:territory', async (req, res) => {
+  const territory = req.params.territory;
 
+  try {
+    const [rows] = await pool.query(
+      "SELECT Emp_Name FROM organogram WHERE Territory = ? LIMIT 1",
+      [territory]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No employee found for given Territory" });
+    }
+
+    res.json({ Emp_Name: rows[0].Emp_Name });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 // ---------- Commitments insert ----------
 
 app.post('/putData', async (req, res) => {
