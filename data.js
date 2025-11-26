@@ -264,7 +264,7 @@ app.get('/checkrole', async (req, res) => {
 
     res.json({ allowed: isAllowed });
 
-  } catch (err) {
+  }  catch (err) {
     console.error("Error /checkrole:", err);
     res.status(500).send("Server Error");
   }
