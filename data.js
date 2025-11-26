@@ -55,7 +55,7 @@ const app = express();
 
 // ---------- Helper: computeAggregates ----------
 // ---------- Hierarchy Route (Fixed) ----------
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000' ;
 app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json());
 
