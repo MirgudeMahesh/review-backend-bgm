@@ -129,9 +129,20 @@ app.get('/healthz', (_, res) => res.send('ok'));
 
 app.post("/hierarchy", async (req, res) => {
   try {
-    const { territory } = req.body || {};
+    // const { territory } = req.body || {};
+    const { territory, includeInactive } = req.body || {};
+    let rows = [];
 
-    const [rows] = await pool.query("SELECT * FROM hierarchy_metrics_agg_rm");
+   if (includeInactive === true) {
+      [rows] = await pool.query(
+        "SELECT * FROM hierarchy_metrics_agg_rm"
+      );
+    } else {
+      [rows] = await pool.query(
+        "SELECT * FROM hierarchy_metrics_agg_rm WHERE Emp_Code != 'vacant'"
+      );
+    }
+
     if (!rows.length) return res.json({ message: "No data found" });
 
     // Map by territory
