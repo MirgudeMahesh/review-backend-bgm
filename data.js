@@ -139,7 +139,7 @@ app.post("/hierarchy", async (req, res) => {
       );
     } else {
       [rows] = await pool.query(
-        "SELECT * FROM hierarchy_metrics_agg_rm WHERE Emp_Code != 'vacant'"
+        "SELECT * FROM hierarchy_metrics_agg_rm WHERE Emp_Code != 'Vacant'"
       );
     }
 
