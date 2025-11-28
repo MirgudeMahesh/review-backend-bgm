@@ -693,10 +693,21 @@ app.get("/getData/:territory", async (req, res) => {
     const territory = req.params.territory;
 
     const [rows] = await pool.query(
-      `SELECT id, metric, sender, sender_territory, receiver_territory, 
-              commitment, goal, received_date, goal_date, receiver_commit_date
-       FROM commitments
-       WHERE receiver_territory = ?`,
+      `
+      SELECT 
+        id,
+        metric,
+        sender,
+        sender_territory,
+        receiver_territory,
+        commitment,
+        goal,
+        DATE_FORMAT(received_date, '%Y-%m-%d') AS received_date,
+        DATE_FORMAT(goal_date, '%Y-%m-%d') AS goal_date,
+        DATE_FORMAT(receiver_commit_date, '%Y-%m-%d') AS receiver_commit_date
+      FROM commitments
+      WHERE receiver_territory = ?
+      `,
       [territory]
     );
 
@@ -706,6 +717,7 @@ app.get("/getData/:territory", async (req, res) => {
     res.status(500).send("Server error");
   }
 });
+
 
 
 // ---------- Update receiver commit date ----------
