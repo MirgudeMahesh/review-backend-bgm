@@ -151,7 +151,6 @@ app.post("/hierarchy", async (req, res) => {
     const avg = (arr) =>
       arr.length ? arr.reduce((a, b) => a + (b || 0), 0) / arr.length : 0;
 
-    // Sum function for Deksel_Midmonth_Qty
     const sum = (arr) =>
       arr.length ? arr.reduce((a, b) => a + (b || 0), 0) : 0;
 
@@ -169,31 +168,44 @@ app.post("/hierarchy", async (req, res) => {
         if (childNode) children[c.Territory] = childNode;
       }
 
-      // Node with all metrics including Deksel_Midmonth_Qty
+      // Node with metrics including all 3 Qty fields
       let node = {
         empName: emp.Emp_Name,
         territory: emp.Territory,
         role: emp.Role,
         children,
+
         Coverage: emp.Coverage ? parseFloat(emp.Coverage) : 0,
         Calls: emp.Calls ? parseFloat(emp.Calls) : 0,
         Compliance: emp.Compliance ? parseFloat(emp.Compliance) : 0,
-        Chemist_Calls: emp.Chemist_Calls
-          ? parseFloat(emp.Chemist_Calls)
+        Chemist_Calls: emp.Chemist_Calls ? parseFloat(emp.Chemist_Calls) : 0,
+
+        // PRODUCT QTY FIELDS
+        Deksel_Midmonth_Qty: emp.Deksel_Midmonth_Qty
+          ? parseFloat(emp.Deksel_Midmonth_Qty)
           : 0,
-        Deksel_Midmonth_Qty: emp.Deksel_Midmonth_Qty 
-          ? parseFloat(emp.Deksel_Midmonth_Qty) 
-          : 0, // ADD Deksel_Midmonth_Qty field
+
+        Voltaneuron_Midmonth_Qty: emp.Voltaneuron_Midmonth_Qty
+          ? parseFloat(emp.Voltaneuron_Midmonth_Qty)
+          : 0,
+
+        Proaxen_Midmonth_Qty: emp.Proaxen_Midmonth_Qty
+          ? parseFloat(emp.Proaxen_Midmonth_Qty)
+          : 0,
       };
 
-      // Aggregate: AVERAGE non-sales fields, SUM Deksel_Midmonth_Qty
+      // Aggregation logic
       if (Object.keys(children).length > 0) {
         const agg = {
           Coverage: [],
           Calls: [],
           Compliance: [],
           Chemist_Calls: [],
-          Deksel_Midmonth_Qty: [], // ADD Deksel_Midmonth_Qty array
+
+          // PRODUCT ARRAYS
+          Deksel_Midmonth_Qty: [],
+          Voltaneuron_Midmonth_Qty: [],
+          Proaxen_Midmonth_Qty: [],
         };
 
         for (const ch of Object.values(children)) {
@@ -201,17 +213,23 @@ app.post("/hierarchy", async (req, res) => {
           agg.Calls.push(ch.Calls || 0);
           agg.Compliance.push(ch.Compliance || 0);
           agg.Chemist_Calls.push(ch.Chemist_Calls || 0);
-          agg.Deksel_Midmonth_Qty.push(ch.Deksel_Midmonth_Qty || 0); // COLLECT Deksel_Midmonth_Qty values
+
+          // PUSH CHILD PRODUCT VALUES
+          agg.Deksel_Midmonth_Qty.push(ch.Deksel_Midmonth_Qty || 0);
+          agg.Voltaneuron_Midmonth_Qty.push(ch.Voltaneuron_Midmonth_Qty || 0);
+          agg.Proaxen_Midmonth_Qty.push(ch.Proaxen_Midmonth_Qty || 0);
         }
 
-        // Average the non-sales metrics
+        // Avg non-sales fields
         node.Coverage = Math.round(avg(agg.Coverage));
         node.Calls = Math.round(avg(agg.Calls));
         node.Compliance = Math.round(avg(agg.Compliance));
         node.Chemist_Calls = Math.round(avg(agg.Chemist_Calls));
-        
-        // SUM the Deksel_Midmonth_Qty values instead of averaging
+
+        // SUM product midmonth qty fields
         node.Deksel_Midmonth_Qty = Math.round(sum(agg.Deksel_Midmonth_Qty));
+        node.Voltaneuron_Midmonth_Qty = Math.round(sum(agg.Voltaneuron_Midmonth_Qty));
+        node.Proaxen_Midmonth_Qty = Math.round(sum(agg.Proaxen_Midmonth_Qty));
       }
 
       return node;
@@ -245,7 +263,6 @@ app.post("/hierarchy", async (req, res) => {
 
 
 
-
 // ---------- Employees ----------
 app.get('/employees', async (req, res) => {
   try {
@@ -261,85 +278,54 @@ app.get('/employees', async (req, res) => {
   }
 });
 
-app.put("/updateDekselMidmonthQty", async (req, res) => {
+app.put('/updateProductQty', async (req, res) => {
   try {
-    const { territory, deksel_midmonth_qty } = req.body;
+    const { territory, metric_type, value } = req.body;
 
-    // Enhanced validation
-    if (!territory) {
-      return res.status(400).json({ error: "Territory is required" });
+    if (!territory || !metric_type || value === undefined) {
+      return res.status(400).json({ 
+        error: "territory, metric_type, and value are required" 
+      });
     }
 
-    // Validate deksel_midmonth_qty is a valid number
-    const qty = parseFloat(deksel_midmonth_qty);
-    if (isNaN(qty)) {
-      return res.status(400).json({ error: "Invalid quantity value" });
+    // Validate metric_type
+    const allowedMetrics = [
+      'deksel_midmonth_qty', 
+      'voltaneuron_midmonth_qty', 
+      'proaxen_midmonth_qty'
+    ];
+
+    if (!allowedMetrics.includes(metric_type.toLowerCase())) {
+      return res.status(400).json({ 
+        error: "Invalid metric_type" 
+      });
     }
 
-    console.log("Updating territory:", territory);
-    console.log("New Deksel_Midmonth_Qty value:", qty);
-
-    // First, check if territory exists
-    const [checkRows] = await pool.query(
-      "SELECT Territory, Deksel_Midmonth_Qty FROM hierarchy_metrics_agg_rm WHERE Territory = ?",
+    // Check current value
+    const [currentRows] = await pool.query(
+      `SELECT ${metric_type} FROM hierarchy_metrics_agg_rm WHERE Territory = ?`,
       [territory]
     );
 
-    console.log("Territory check result:", checkRows);
-
-    if (checkRows.length === 0) {
-      return res.status(404).json({ 
-        error: "Territory not found",
-        territory: territory 
-      });
+    if (currentRows.length > 0 && currentRows[0][metric_type] === value) {
+      return res.json({ alreadyUpToDate: true });
     }
 
-    // Log current value
-    console.log("Current value:", checkRows[0].Deksel_Midmonth_Qty);
-
-    // Perform update with exact territory match
+    // Update the value
     const [result] = await pool.query(
-      "UPDATE hierarchy_metrics_agg_rm SET Deksel_Midmonth_Qty = ? WHERE Territory = ?",
-      [qty, territory]
+      `UPDATE hierarchy_metrics_agg_rm SET ${metric_type} = ? WHERE Territory = ?`,
+      [value, territory]
     );
 
-    console.log("Update result:", result);
-
-    // Check if update was successful
-    if (result.affectedRows === 0) {
-      // Value might already be the same
-      if (parseFloat(checkRows[0].Deksel_Midmonth_Qty) === qty) {
-        return res.json({
-          success: true,
-          message: "Value is already set to the requested amount",
-          territory,
-          deksel_midmonth_qty: qty,
-          alreadyUpToDate: true
-        });
-      }
-      
-      return res.status(500).json({ 
-        error: "Update failed - no rows affected",
-        territory,
-        currentValue: checkRows[0].Deksel_Midmonth_Qty,
-        attemptedValue: qty
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "Deksel Midmonth Qty updated successfully",
-      territory,
-      deksel_midmonth_qty: qty,
-      affectedRows: result.affectedRows
+    res.json({ 
+      success: true, 
+      affectedRows: result.affectedRows,
+      alreadyUpToDate: false
     });
 
   } catch (err) {
-    console.error("❌ Error updating Deksel Midmonth Qty:", err);
-    res.status(500).json({ 
-      error: "Server error: " + err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
+    console.error("Error /updateProductQty:", err);
+    res.status(500).json({ error: "Server Error: " + err.message });
   }
 });
 
@@ -380,6 +366,33 @@ app.get('/checkrole', async (req, res) => {
   }
 });
 
+app.get('/getdivision', async (req, res) => {
+  try {
+    const { territory } = req.query;
+
+    if (!territory) {
+      return res.status(400).json({ error: "territory is required" });
+    }
+
+    // Fetch division from organogram table
+    const [rows] = await pool.query(
+      `SELECT Division FROM organogram WHERE Territory = ? LIMIT 1`,
+      [territory]
+    );
+
+    if (rows.length === 0) {
+      return res.json({ division: null }); // No match
+    }
+
+    const division = rows[0].Division;
+
+    res.json({ division });
+
+  } catch (err) {
+    console.error("Error /getdivision:", err);
+    res.status(500).send("Server Error");
+  }
+});
 
 app.get('/emp-name/:territory', async (req, res) => {
   const territory = req.params.territory;
