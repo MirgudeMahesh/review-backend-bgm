@@ -258,17 +258,17 @@ app.get('/employees', async (req, res) => {
   }
 });
 
-app.put("/updateMMR", async (req, res) => {
+app.put("/updateDekselMidmonthQty", async (req, res) => {
   try {
-    const { territory, mmr } = req.body;
+    const { territory, deksel_midmonth_qty } = req.body;
 
     if (!territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
     const [result] = await pool.query(
-      "UPDATE hierarchy_metrics_agg_rm SET MMR = ? WHERE Territory = ?",
-      [mmr, territory]
+      "UPDATE hierarchy_metrics_agg_rm SET Deksel_Midmonth_Qty = ? WHERE Territory = ?",
+      [deksel_midmonth_qty, territory]
     );
 
     if (result.affectedRows === 0) {
@@ -277,16 +277,17 @@ app.put("/updateMMR", async (req, res) => {
 
     res.json({
       success: true,
-      message: "MMR updated successfully",
+      message: "Deksel Midmonth Qty updated successfully",
       territory,
-      mmr
+      deksel_midmonth_qty
     });
 
   } catch (err) {
-    console.error("❌ Error updating MMR:", err);
+    console.error("❌ Error updating Deksel Midmonth Qty:", err);
     res.status(500).json({ error: "Server error: " + err.message });
   }
 });
+
 
 app.get('/checkrole', async (req, res) => {
   try {
