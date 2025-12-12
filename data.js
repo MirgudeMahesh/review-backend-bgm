@@ -151,7 +151,7 @@ app.post("/hierarchy", async (req, res) => {
     const avg = (arr) =>
       arr.length ? arr.reduce((a, b) => a + (b || 0), 0) / arr.length : 0;
 
-    // NEW: Sum function for MMR
+    // Sum function for Deksel_Midmonth_Qty
     const sum = (arr) =>
       arr.length ? arr.reduce((a, b) => a + (b || 0), 0) : 0;
 
@@ -169,7 +169,7 @@ app.post("/hierarchy", async (req, res) => {
         if (childNode) children[c.Territory] = childNode;
       }
 
-      // Node with sales data (MMR)
+      // Node with all metrics including Deksel_Midmonth_Qty
       let node = {
         empName: emp.Emp_Name,
         territory: emp.Territory,
@@ -181,17 +181,19 @@ app.post("/hierarchy", async (req, res) => {
         Chemist_Calls: emp.Chemist_Calls
           ? parseFloat(emp.Chemist_Calls)
           : 0,
-        MMR: emp.MMR ? parseFloat(emp.MMR) : 0, // ADD MMR field
+        Deksel_Midmonth_Qty: emp.Deksel_Midmonth_Qty 
+          ? parseFloat(emp.Deksel_Midmonth_Qty) 
+          : 0, // ADD Deksel_Midmonth_Qty field
       };
 
-      // Aggregate: AVERAGE non-sales fields, SUM MMR
+      // Aggregate: AVERAGE non-sales fields, SUM Deksel_Midmonth_Qty
       if (Object.keys(children).length > 0) {
         const agg = {
           Coverage: [],
           Calls: [],
           Compliance: [],
           Chemist_Calls: [],
-          MMR: [], // ADD MMR array
+          Deksel_Midmonth_Qty: [], // ADD Deksel_Midmonth_Qty array
         };
 
         for (const ch of Object.values(children)) {
@@ -199,7 +201,7 @@ app.post("/hierarchy", async (req, res) => {
           agg.Calls.push(ch.Calls || 0);
           agg.Compliance.push(ch.Compliance || 0);
           agg.Chemist_Calls.push(ch.Chemist_Calls || 0);
-          agg.MMR.push(ch.MMR || 0); // COLLECT MMR values
+          agg.Deksel_Midmonth_Qty.push(ch.Deksel_Midmonth_Qty || 0); // COLLECT Deksel_Midmonth_Qty values
         }
 
         // Average the non-sales metrics
@@ -208,8 +210,8 @@ app.post("/hierarchy", async (req, res) => {
         node.Compliance = Math.round(avg(agg.Compliance));
         node.Chemist_Calls = Math.round(avg(agg.Chemist_Calls));
         
-        // SUM the MMR values instead of averaging
-        node.MMR = Math.round(sum(agg.MMR));
+        // SUM the Deksel_Midmonth_Qty values instead of averaging
+        node.Deksel_Midmonth_Qty = Math.round(sum(agg.Deksel_Midmonth_Qty));
       }
 
       return node;
@@ -235,6 +237,7 @@ app.post("/hierarchy", async (req, res) => {
     res.status(500).send("Server error: " + err.message);
   }
 });
+
 
 
 
@@ -286,7 +289,8 @@ app.put("/updateDekselMidmonthQty", async (req, res) => {
     console.error("❌ Error updating Deksel Midmonth Qty:", err);
     res.status(500).json({ error: "Server error: " + err.message });
   }
-});
+}); // ✅ CORRECT CLOSING
+
 
 
 app.get('/checkrole', async (req, res) => {
