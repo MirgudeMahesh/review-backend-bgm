@@ -129,11 +129,10 @@ app.get('/healthz', (_, res) => res.send('ok'));
 
 app.post("/hierarchy", async (req, res) => {
   try {
-    // const { territory } = req.body || {};
     const { territory, includeInactive } = req.body || {};
     let rows = [];
 
-   if (includeInactive === true) {
+    if (includeInactive === true) {
       [rows] = await pool.query(
         "SELECT * FROM hierarchy_metrics_agg_rm"
       );
@@ -152,6 +151,10 @@ app.post("/hierarchy", async (req, res) => {
     const avg = (arr) =>
       arr.length ? arr.reduce((a, b) => a + (b || 0), 0) / arr.length : 0;
 
+    // NEW: Sum function for MMR
+    const sum = (arr) =>
+      arr.length ? arr.reduce((a, b) => a + (b || 0), 0) : 0;
+
     function buildNode(terr) {
       const emp = byTerritory[terr];
       if (!emp) return null;
@@ -166,7 +169,7 @@ app.post("/hierarchy", async (req, res) => {
         if (childNode) children[c.Territory] = childNode;
       }
 
-      // Node WITHOUT ANY SALES DATA
+      // Node with sales data (MMR)
       let node = {
         empName: emp.Emp_Name,
         territory: emp.Territory,
@@ -178,15 +181,17 @@ app.post("/hierarchy", async (req, res) => {
         Chemist_Calls: emp.Chemist_Calls
           ? parseFloat(emp.Chemist_Calls)
           : 0,
+        MMR: emp.MMR ? parseFloat(emp.MMR) : 0, // ADD MMR field
       };
 
-      // Aggregate ONLY non-sales fields
+      // Aggregate: AVERAGE non-sales fields, SUM MMR
       if (Object.keys(children).length > 0) {
         const agg = {
           Coverage: [],
           Calls: [],
           Compliance: [],
           Chemist_Calls: [],
+          MMR: [], // ADD MMR array
         };
 
         for (const ch of Object.values(children)) {
@@ -194,12 +199,17 @@ app.post("/hierarchy", async (req, res) => {
           agg.Calls.push(ch.Calls || 0);
           agg.Compliance.push(ch.Compliance || 0);
           agg.Chemist_Calls.push(ch.Chemist_Calls || 0);
+          agg.MMR.push(ch.MMR || 0); // COLLECT MMR values
         }
 
+        // Average the non-sales metrics
         node.Coverage = Math.round(avg(agg.Coverage));
         node.Calls = Math.round(avg(agg.Calls));
         node.Compliance = Math.round(avg(agg.Compliance));
         node.Chemist_Calls = Math.round(avg(agg.Chemist_Calls));
+        
+        // SUM the MMR values instead of averaging
+        node.MMR = Math.round(sum(agg.MMR));
       }
 
       return node;
@@ -232,6 +242,7 @@ app.post("/hierarchy", async (req, res) => {
 
 
 
+
 // ---------- Employees ----------
 app.get('/employees', async (req, res) => {
   try {
@@ -244,6 +255,36 @@ app.get('/employees', async (req, res) => {
   } catch (err) {
     console.error('Error /employees:', err);
     res.status(500).send("Error");
+  }
+});
+
+app.put("/updateMMR", async (req, res) => {
+  try {
+    const { territory, mmr } = req.body;
+
+    if (!territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    const [result] = await pool.query(
+      "UPDATE hierarchy_metrics_agg_rm SET MMR = ? WHERE Territory = ?",
+      [mmr, territory]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Territory not found" });
+    }
+
+    res.json({
+      success: true,
+      message: "MMR updated successfully",
+      territory,
+      mmr
+    });
+
+  } catch (err) {
+    console.error("❌ Error updating MMR:", err);
+    res.status(500).json({ error: "Server error: " + err.message });
   }
 });
 
@@ -280,6 +321,8 @@ app.get('/checkrole', async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
+
+
 app.get('/emp-name/:territory', async (req, res) => {
   const territory = req.params.territory;
 
