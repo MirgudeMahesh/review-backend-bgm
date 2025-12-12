@@ -265,31 +265,84 @@ app.put("/updateDekselMidmonthQty", async (req, res) => {
   try {
     const { territory, deksel_midmonth_qty } = req.body;
 
+    // Enhanced validation
     if (!territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [result] = await pool.query(
-      "UPDATE hierarchy_metrics_agg_rm SET Deksel_Midmonth_Qty = ? WHERE Territory = ?",
-      [deksel_midmonth_qty, territory]
+    // Validate deksel_midmonth_qty is a valid number
+    const qty = parseFloat(deksel_midmonth_qty);
+    if (isNaN(qty)) {
+      return res.status(400).json({ error: "Invalid quantity value" });
+    }
+
+    console.log("Updating territory:", territory);
+    console.log("New Deksel_Midmonth_Qty value:", qty);
+
+    // First, check if territory exists
+    const [checkRows] = await pool.query(
+      "SELECT Territory, Deksel_Midmonth_Qty FROM hierarchy_metrics_agg_rm WHERE Territory = ?",
+      [territory]
     );
 
+    console.log("Territory check result:", checkRows);
+
+    if (checkRows.length === 0) {
+      return res.status(404).json({ 
+        error: "Territory not found",
+        territory: territory 
+      });
+    }
+
+    // Log current value
+    console.log("Current value:", checkRows[0].Deksel_Midmonth_Qty);
+
+    // Perform update with exact territory match
+    const [result] = await pool.query(
+      "UPDATE hierarchy_metrics_agg_rm SET Deksel_Midmonth_Qty = ? WHERE Territory = ?",
+      [qty, territory]
+    );
+
+    console.log("Update result:", result);
+
+    // Check if update was successful
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: "Territory not found" });
+      // Value might already be the same
+      if (parseFloat(checkRows[0].Deksel_Midmonth_Qty) === qty) {
+        return res.json({
+          success: true,
+          message: "Value is already set to the requested amount",
+          territory,
+          deksel_midmonth_qty: qty,
+          alreadyUpToDate: true
+        });
+      }
+      
+      return res.status(500).json({ 
+        error: "Update failed - no rows affected",
+        territory,
+        currentValue: checkRows[0].Deksel_Midmonth_Qty,
+        attemptedValue: qty
+      });
     }
 
     res.json({
       success: true,
       message: "Deksel Midmonth Qty updated successfully",
       territory,
-      deksel_midmonth_qty
+      deksel_midmonth_qty: qty,
+      affectedRows: result.affectedRows
     });
 
   } catch (err) {
     console.error("❌ Error updating Deksel Midmonth Qty:", err);
-    res.status(500).json({ error: "Server error: " + err.message });
+    res.status(500).json({ 
+      error: "Server error: " + err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
-}); // ✅ CORRECT CLOSING
+});
+
 
 
 
