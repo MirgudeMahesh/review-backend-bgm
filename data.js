@@ -57,6 +57,16 @@ const app = express();
 // ---------- Hierarchy Route (Fixed) ----------
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000' ;
 app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
+// const allowedOrigins = [
+//   'http://localhost:3000',
+//   'http://127.0.0.1:3000',
+//   process.env.FRONTEND_ORIGIN // optional: for production
+// ].filter(Boolean);
+
+// app.use(cors({
+//   origin: allowedOrigins,
+//   credentials: true
+// }));
 app.use(express.json());
 
 // ---------- DB pool (supports DATABASE_URL or individual env vars) ----------
@@ -329,6 +339,47 @@ app.put('/updateProductQty', async (req, res) => {
   }
 });
 
+
+app.post('/midmonth-review', async (req, res) => {
+  try {
+    const { sender_territory, receiver_territory, Metric, Value, created_at } = req.body;
+
+    // Validate required fields
+    if (!sender_territory || !receiver_territory || !Metric || Value === undefined) {
+      return res.status(400).json({ 
+        error: "All fields are required: sender_territory, receiver_territory, Metric, Value" 
+      });
+    }
+
+    // Generate IST timestamp
+    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC + 5:30
+    const istTime = new Date(Date.now() + istOffset);
+    const timestamp = created_at || istTime.toISOString().slice(0, 19).replace('T', ' ');
+
+    // Insert into Midmonth_review_logs table
+    const [result] = await pool.query(
+      `INSERT INTO Midmonth_review_logs 
+       (sender_territory, receiver_territory, Metric, Value, created_at) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [sender_territory, receiver_territory, Metric, Value, timestamp]
+    );
+
+    // Return success response
+    res.status(201).json({ 
+      success: true,
+      message: "Record inserted successfully",
+      insertId: result.insertId,
+      timestamp: timestamp
+    });
+
+  } catch (err) {
+    console.error("Error /midmonth-review:", err);
+    res.status(500).json({ 
+      error: "Server Error",
+      details: err.message 
+    });
+  }
+});
 
 
 
