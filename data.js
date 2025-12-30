@@ -392,7 +392,7 @@ app.get('/checkrole', async (req, res) => {
     }
 
     const [rows] = await pool.query(
-      `SELECT Role FROM organogram WHERE Territory = ? LIMIT 1`,
+      `SELECT Role,Emp_Name FROM organogram WHERE Territory = ? LIMIT 1`,
       [territory]
     );
 
@@ -406,7 +406,8 @@ app.get('/checkrole', async (req, res) => {
 
     res.json({ 
       allowed: isAllowed,
-      role: rows[0].Role // Return actual role for debugging
+      role: rows[0].Role,
+      name: rows[0].Emp_Name // Return actual role for debugging
     });
 
   } catch (err) {
