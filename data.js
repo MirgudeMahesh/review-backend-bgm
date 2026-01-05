@@ -1256,10 +1256,11 @@ const values = data.map(row => {
 
 
 // ---------- Filter data (VALIDATE metric to prevent injection) ----------
-const ALLOWED_METRICS = ['Coverage', 'Compliance', 'Calls', 'Drs_Met']; // <- Replace with your actual numeric columns
+const ALLOWED_METRICS = ['Coverage', 'Compliance', 'Doctor_Calls', 'Chemist_Met']; // <- Replace with your actual numeric columns
 app.post("/filterData", async (req, res) => {
   try {
     const { metric, from, to } = req.body;
+
     if (!metric || from === undefined || to === undefined) {
       return res.status(400).json({ error: "Missing required fields" });
     }
@@ -1270,7 +1271,7 @@ app.post("/filterData", async (req, res) => {
 
     const query = `
       SELECT Territory, Emp_Code, Emp_Name, \`${metric}\`
-      FROM dashboard1
+      FROM bgm_be_dashboard_ftm
       WHERE \`${metric}\` BETWEEN ? AND ?
     `;
     const [rows] = await pool.query(query, [from, to]);
