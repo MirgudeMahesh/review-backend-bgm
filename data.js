@@ -419,7 +419,6 @@ app.get('/checkrole', async (req, res) => {
 app.get('/getdivision', async (req, res) => {
   try {
     const { territory } = req.query;
-
     if (!territory) {
       return res.status(400).json({ error: "territory is required" });
     }
@@ -561,6 +560,31 @@ app.post('/bmDashboardData', async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+app.post('/blDashboardData', async (req, res) => {
+  try {
+    const { Territory } = req.body; // 👈 Get Territory from frontend
+    
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT * FROM bgm_bl_dashboard_ftm WHERE BL_Territory = ?`,
+      [Territory] // 👈 Pass safely to prevent SQL injection
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No record found for this Territory" });
+    }
+
+    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
 app.post('/dashboardytdData', async (req, res) => {
   try {
     const { Territory } = req.body; // 👈 Get Territory from frontend
@@ -608,7 +632,29 @@ app.post('/bmDashboardytdData', async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+app.post('/blDashboardytdData', async (req, res) => {
+  try {
+    const { Territory } = req.body; // 👈 Get Territory from frontend
+    
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
 
+    const [rows] = await pool.query(
+      `SELECT * FROM bgm_bl_dashboard_ytd WHERE BL_Territory = ?`,
+      [Territory] // 👈 Pass safely to prevent SQL injection
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No record found for this Territory" });
+    }
+
+    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
 app.post('/dashboardYTD', async (req, res) => {
   try {
@@ -879,6 +925,208 @@ app.post('/bmEfficiency', async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching BM efficiency:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+app.post('/blEfficiency', async (req, res) => {
+  try {
+    const { Territory } = req.body;
+
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    // 1) Fetch FTM (month) scores for BL
+    const [ftmRows] = await pool.query(
+      `SELECT
+         -- Business Performance FTM
+         Target_Achievement_Score,
+         Territories_Achieving_Target_Score,
+         Territories_Achieving_Cat_A_MEP_Score,
+         Category_B_Sales_Vs_Target_Score,
+         Corporate_Drs_Visited_Last_2M_Score,
+         Corporate_Drs_Active_Prescribers_Score,
+
+         -- Performance (Efforts) FTM  
+         Hiring_Quality_Index_Score,
+         Induction_Score,
+         Infant_Attrition_Rate_Score,
+         Overall_Attrition_Rate_Score,
+
+         -- Hygiene FTM
+         Returns_Score,
+         Outstanding_Score,
+         Marketing_Activity_Sales_Score,
+         Closing_Score,
+
+         -- Commitment FTM
+         Team_Coverage_Score,
+         Team_Compliance_Score,
+         BM_Priority_Drs_Coverage_Score,
+         TP_Adherence_Score,
+         Secondary_Variance_Score,
+         MSP_Compliance_Territories_Score,
+         MSR_Compliance_Territories_Score
+
+       FROM bgm_bl_dashboard_ftm
+       WHERE BL_Territory = ?`,
+      [Territory]
+    );
+
+    // 2) Fetch YTD scores for BL
+    const [ytdRows] = await pool.query(
+      `SELECT
+         -- Business Performance YTD
+         Target_Achievement_Score,
+         Territories_Achieving_Target_Score,
+         Territories_Achieving_Cat_A_MEP_Score,
+         Category_B_Sales_Vs_Target_Score,
+        
+         Corporate_Drs_Active_Prescribers_Score,
+
+         -- Performance (Efforts) YTD
+         Hiring_Quality_Index_Score,
+         Induction_Score,
+         Infant_Attrition_Rate_Score,
+         Overall_Attrition_Rate_Score,
+
+         -- Hygiene YTD
+         Returns_Score,
+         Marketing_Activity_Sales_Score,
+
+         -- Commitment YTD
+         Team_Coverage_Score,
+         Team_Compliance_Score,
+         BM_Priority_Drs_Coverage_Score,
+         TP_Adherence_Score,
+         Secondary_Variance_Score,
+         MSP_Compliance_Territories_Score,
+         MSR_Compliance_Territories_Score
+
+       FROM bgm_bl_dashboard_ytd
+       WHERE BL_Territory = ?`,
+      [Territory]
+    );
+
+    if (!ftmRows.length || !ytdRows.length) {
+      return res.status(404).json({ message: "No BL record found for this Territory" });
+    }
+
+    const ftm = ftmRows[0];
+    const ytd = ytdRows[0];
+
+    // ---------------------------
+    // Business Performance totals
+    // ---------------------------
+    const blBusinessMonth = (
+      (Number(ftm.Target_Achievement_Score) || 0) +
+      (Number(ftm.Territories_Achieving_Target_Score) || 0) +
+      (Number(ftm.Territories_Achieving_Cat_A_MEP_Score) || 0) +
+      (Number(ftm.Category_B_Sales_Vs_Target_Score) || 0) +
+      (Number(ftm.Corporate_Drs_Visited_Last_2M_Score) || 0) +
+      (Number(ftm.Corporate_Drs_Active_Prescribers_Score) || 0)
+    ).toFixed(2);
+
+    const blBusinessYTD = (
+      (Number(ytd.Target_Achievement_Score) || 0) +
+      (Number(ytd.Territories_Achieving_Target_Score) || 0) +
+      (Number(ytd.Territories_Achieving_Cat_A_MEP_Score) || 0) +
+      (Number(ytd.Category_B_Sales_Vs_Target_Score) || 0) +
+   
+      (Number(ytd.Corporate_Drs_Active_Prescribers_Score) || 0)
+    ).toFixed(2);
+
+    // ---------------------------
+    // Performance/Efforts totals
+    // ---------------------------
+    const blEffortMonth = (
+      (Number(ftm.Hiring_Quality_Index_Score) || 0) +
+      (Number(ftm.Induction_Score) || 0) +
+      (Number(ftm.Infant_Attrition_Rate_Score) || 0) +
+      (Number(ftm.Overall_Attrition_Rate_Score) || 0)
+    ).toFixed(2);
+
+    const blEffortYTD = (
+      (Number(ytd.Hiring_Quality_Index_Score) || 0) +
+      (Number(ytd.Induction_Score) || 0) +
+      (Number(ytd.Infant_Attrition_Rate_Score) || 0) +
+      (Number(ytd.Overall_Attrition_Rate_Score) || 0)
+    ).toFixed(2);
+
+    // ---------------------------
+    // Hygiene totals
+    // ---------------------------
+    const blHygieneMonth = (
+      (Number(ftm.Returns_Score) || 0) +
+      (Number(ftm.Outstanding_Score) || 0) +
+      (Number(ftm.Marketing_Activity_Sales_Score) || 0) +
+      (Number(ftm.Closing_Score) || 0)
+    ).toFixed(2);
+
+    const blHygieneYTD = (
+      (Number(ytd.Returns_Score) || 0) +
+      (Number(ytd.Marketing_Activity_Sales_Score) || 0)
+    ).toFixed(2);
+
+    // ---------------------------
+    // Commitment totals
+    // ---------------------------
+    const blCommitmentMonth = (
+      (Number(ftm.Team_Coverage_Score) || 0) +
+      (Number(ftm.Team_Compliance_Score) || 0) +
+      (Number(ftm.BM_Priority_Drs_Coverage_Score) || 0) +
+      (Number(ftm.TP_Adherence_Score) || 0) +
+      (Number(ftm.Secondary_Variance_Score) || 0) +
+      (Number(ftm.MSP_Compliance_Territories_Score) || 0) +
+      (Number(ftm.MSR_Compliance_Territories_Score) || 0)
+    ).toFixed(2);
+
+    const blCommitmentYTD = (
+      (Number(ytd.Team_Coverage_Score) || 0) +
+      (Number(ytd.Team_Compliance_Score) || 0) +
+      (Number(ytd.BM_Priority_Drs_Coverage_Score) || 0) +
+      (Number(ytd.TP_Adherence_Score) || 0) +
+      (Number(ytd.Secondary_Variance_Score) || 0) +
+      (Number(ytd.MSP_Compliance_Territories_Score) || 0) +
+      (Number(ytd.MSR_Compliance_Territories_Score) || 0)
+    ).toFixed(2);
+
+    // ---------------------------
+    // Efficiency Index (BL)
+    // ---------------------------
+    const efficiencyMonth = (
+      Number(blBusinessMonth) +
+      Number(blEffortMonth) +
+      Number(blHygieneMonth) +
+      Number(blCommitmentMonth)
+    ).toFixed(2);
+
+    const efficiencyYTD = (
+      Number(blBusinessYTD) +
+      Number(blEffortYTD) +
+      Number(blHygieneYTD) +
+      Number(blCommitmentYTD)
+    ).toFixed(2);
+
+    res.json({
+      businessMonth: Number(blBusinessMonth),
+      businessYTD: Number(blBusinessYTD),
+
+      effortMonth: Number(blEffortMonth),
+      effortYTD: Number(blEffortYTD),
+
+      hygieneMonth: Number(blHygieneMonth),
+      hygieneYTD: Number(blHygieneYTD),
+
+      commitmentMonth: Number(blCommitmentMonth),
+      commitmentYTD: Number(blCommitmentYTD),
+
+      efficiencyMonth: Number(efficiencyMonth),
+      efficiencyYTD: Number(efficiencyYTD),
+    });
+
+  } catch (error) {
+    console.error("Error fetching BL efficiency:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -1272,7 +1520,7 @@ app.post("/filterData", async (req, res) => {
     const query = `
       SELECT Territory, Emp_Code, Emp_Name, \`${metric}\`
       FROM bgm_be_dashboard_ftm
-      WHERE \`${metric}\` BETWEEN ? AND ?
+      WHERE \`${metric}\` BETWEEN ? AND ?  and Emp_Code != 'Vacant';
     `;
     const [rows] = await pool.query(query, [from, to]);
     res.json(rows);
