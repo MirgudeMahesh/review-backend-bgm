@@ -1031,6 +1031,7 @@ app.post('/blEfficiency', async (req, res) => {
       (Number(ytd.Target_Achievement_Score) || 0) +
       (Number(ytd.Territories_Achieving_Target_Score) || 0) +
       (Number(ytd.Territories_Achieving_Cat_A_MEP_Score) || 0) +
+      (Number(ytd.Corporate_Drs_Coverage_Score) || 0) +
       (Number(ytd.Category_B_Sales_Vs_Target_Score) || 0) +
    
       (Number(ytd.Corporate_Drs_Active_Prescribers_Score) || 0)
