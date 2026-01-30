@@ -584,6 +584,52 @@ app.post('/blDashboardData', async (req, res) => {
   }
 });
 
+app.post('/bhDashboardData', async (req, res) => {
+  try {
+    const { Territory } = req.body; // 👈 Get Territory from frontend
+    
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT * FROM bgm_bh_dashboard_ftm WHERE BH_Territory = ?`,
+      [Territory] // 👈 Pass safely to prevent SQL injection
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No record found for this Territory" });
+    }
+
+    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+app.post('/sbuhDashboardData', async (req, res) => {
+  try {
+    const { Territory } = req.body; // 👈 Get Territory from frontend
+    
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT * FROM bgm_sbuh_dashboard_ftm WHERE SBUH_Territory = ?`,
+      [Territory] // 👈 Pass safely to prevent SQL injection
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No record found for this Territory" });
+    }
+
+    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
 app.post('/dashboardytdData', async (req, res) => {
   try {
@@ -642,6 +688,53 @@ app.post('/blDashboardytdData', async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT * FROM bgm_bl_dashboard_ytd WHERE BL_Territory = ?`,
+      [Territory] // 👈 Pass safely to prevent SQL injection
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No record found for this Territory" });
+    }
+
+    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+app.post('/bhDashboardytdData', async (req, res) => {
+  try {
+    const { Territory } = req.body; // 👈 Get Territory from frontend
+    
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT * FROM bgm_bh_dashboard_ytd WHERE BH_Territory = ?`,
+      [Territory] // 👈 Pass safely to prevent SQL injection
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No record found for this Territory" });
+    }
+
+    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.post('/sbuhDashboardytdData', async (req, res) => {
+  try {
+    const { Territory } = req.body; // 👈 Get Territory from frontend
+    
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT * FROM bgm_sbuh_dashboard_ytd WHERE SBUH_Territory = ?`,
       [Territory] // 👈 Pass safely to prevent SQL injection
     );
 
@@ -1131,6 +1224,371 @@ app.post('/blEfficiency', async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+app.post('/bhEfficiency', async (req, res) => {
+  try {
+    const { Territory } = req.body;
+
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    // -----------------------------
+    // Fetch FTM (Month) data
+    // -----------------------------
+    const [ftmRows] = await pool.query(
+      `SELECT
+        -- Business Performance
+        Target_Achievement_Score,
+        Territories_Achieving_Cat_A_MEP_Score,
+        Category_B_Sales_Vs_Target_Score,
+        BMs_Achieving_Target_Score,
+        Span_of_Performance_Score,
+
+        -- Performance / Efforts
+        Overall_Attrition_Rate_Score,
+        Secondary_Variance_Score,
+        MSP_Compliance_Territories_Score,
+        MSR_Compliance_Territories_Score,
+        BE_Active_vs_Sanctioned_Score,
+        BM_BL_Active_vs_Sanctioned_Score,
+
+        -- Hygiene
+        Returns_Score,
+        Outstanding_Score,
+        Marketing_Activity_Sales_Score,
+        Closing_Score,
+
+        -- Commitment
+        Calls_Score,
+        Coverage_Score,
+        Compliance_Score,
+        Priority_Drs_Coverage_Score,
+        Priority_RX_Drs_Score,
+        BM_Priority_Drs_Coverage_Score
+      FROM bgm_bh_dashboard_ftm
+      WHERE BH_Territory = ?`,
+      [Territory]
+    );
+
+    // -----------------------------
+    // Fetch YTD data
+    // -----------------------------
+    const [ytdRows] = await pool.query(
+      `SELECT
+        Target_Achievement_Score,
+        Territories_Achieving_Cat_A_MEP_Score,
+        Category_B_Sales_Vs_Target_Score,
+        BMs_Achieving_Target_Score,
+        Span_of_Performance_Score,
+
+        Overall_Attrition_Rate_Score,
+        Secondary_Variance_Score,
+        MSP_Compliance_Territories_Score,
+        MSR_Compliance_Territories_Score,
+      
+
+        Returns_Score,
+        
+        Marketing_Activity_Sales_Score,
+      
+
+        Calls_Score,
+        Team_Coverage_Score,
+        Team_Compliance_Score,
+        Corporate_Drs_Coverage_Score,
+        Corporate_Drs_Active_Prescribers_Score,
+        BM_Priority_Drs_Coverage_Score
+      FROM bgm_bh_dashboard_ytd
+      WHERE BH_Territory = ?`,
+      [Territory]
+    );
+
+    if (!ftmRows.length || !ytdRows.length) {
+      return res.status(404).json({ message: "No BH record found" });
+    }
+
+    const ftm = ftmRows[0];
+    const ytd = ytdRows[0];
+
+    // =============================
+    // BUSINESS PERFORMANCE
+    // =============================
+    const businessMonth =
+      (Number(ftm.Target_Achievement_Score) || 0) +
+      (Number(ftm.Territories_Achieving_Cat_A_MEP_Score) || 0) +
+      (Number(ftm.Category_B_Sales_Vs_Target_Score) || 0) +
+      (Number(ftm.BMs_Achieving_Target_Score) || 0) +
+      (Number(ftm.Span_of_Performance_Score) || 0);
+
+    const businessYTD =
+      (Number(ytd.Target_Achievement_Score) || 0) +
+      (Number(ytd.Territories_Achieving_Cat_A_MEP_Score) || 0) +
+      (Number(ytd.Category_B_Sales_Vs_Target_Score) || 0) +
+      (Number(ytd.BMs_Achieving_Target_Score) || 0) +
+      (Number(ytd.Span_of_Performance_Score) || 0);
+
+    // =============================
+    // PERFORMANCE / EFFORTS
+    // =============================
+    const effortMonth =
+      (Number(ftm.Overall_Attrition_Rate_Score) || 0) +
+      (Number(ftm.Secondary_Variance_Score) || 0) +
+      (Number(ftm.MSP_Compliance_Territories_Score) || 0) +
+      (Number(ftm.MSR_Compliance_Territories_Score) || 0) +
+      (Number(ftm.BE_Active_vs_Sanctioned_Score) || 0) +
+      (Number(ftm.BM_BL_Active_vs_Sanctioned_Score) || 0);
+
+    const effortYTD =
+      (Number(ytd.Overall_Attrition_Rate_Score) || 0) +
+      (Number(ytd.Secondary_Variance_Score) || 0) +
+      (Number(ytd.MSP_Compliance_Territories_Score) || 0) +
+      (Number(ytd.MSR_Compliance_Territories_Score) || 0) 
+    
+
+    // =============================
+    // HYGIENE
+    // =============================
+    const hygieneMonth =
+      (Number(ftm.Returns_Score) || 0) +
+      (Number(ftm.Outstanding_Score) || 0) +
+      (Number(ftm.Marketing_Activity_Sales_Score) || 0) +
+      (Number(ftm.Closing_Score) || 0);
+
+    const hygieneYTD =
+      (Number(ytd.Returns_Score) || 0) +
+     
+      (Number(ytd.Marketing_Activity_Sales_Score) || 0) 
+
+    // =============================
+    // COMMITMENT
+    // =============================
+    const commitmentMonth =
+      (Number(ftm.Calls_Score) || 0) +
+      (Number(ftm.Coverage_Score) || 0) +
+      (Number(ftm.Compliance_Score) || 0) +
+      (Number(ftm.Priority_Drs_Coverage_Score) || 0) +
+      (Number(ftm.Priority_RX_Drs_Score) || 0) +
+      (Number(ftm.BM_Priority_Drs_Coverage_Score) || 0);
+
+    const commitmentYTD =
+      (Number(ytd.Calls_Score) || 0) +
+      (Number(ytd.Team_Coverage_Score) || 0) +
+      (Number(ytd.Team_Compliance_Score) || 0) +
+      (Number(ytd.Corporate_Drs_Coverage_Score) || 0) +
+      (Number(ytd.Corporate_Drs_Active_Prescribers_Score) || 0) +
+      (Number(ytd.BM_Priority_Drs_Coverage_Score) || 0);
+
+    // =============================
+    // EFFICIENCY INDEX
+    // =============================
+    const efficiencyMonth =
+      businessMonth + effortMonth + hygieneMonth + commitmentMonth;
+
+    const efficiencyYTD =
+      businessYTD + effortYTD + hygieneYTD + commitmentYTD;
+
+    res.json({
+      businessMonth,
+      businessYTD,
+      effortMonth,
+      effortYTD,
+      hygieneMonth,
+      hygieneYTD,
+      commitmentMonth,
+      commitmentYTD,
+      efficiencyMonth,
+      efficiencyYTD
+    });
+
+  } catch (err) {
+    console.error("BH Efficiency error:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+app.post('/sbuhEfficiency', async (req, res) => {
+  try {
+    const { Territory } = req.body;
+
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    // -----------------------------
+    // Fetch FTM (Month) data
+    // -----------------------------
+    const [ftmRows] = await pool.query(
+      `SELECT
+        -- Business Performance
+        Target_Achievement_Score,
+        Territories_Achieving_Cat_A_MEP_Score,
+        Category_B_Sales_Vs_Target_Score,
+        BMs_Achieving_Target_Score,
+        Span_of_Performance_Score,
+
+        -- Performance / Efforts
+        Overall_Attrition_Rate_Score,
+        Secondary_Variance_Score,
+        MSP_Compliance_Territories_Score,
+        MSR_Compliance_Territories_Score,
+        BE_Active_vs_Sanctioned_Score,
+        BM_BL_Active_vs_Sanctioned_Score,
+
+        -- Hygiene
+        Returns_Score,
+        Outstanding_Score,
+        Marketing_Activity_Sales_Score,
+        Closing_Score,
+
+        -- Commitment
+        Calls_Score,
+        Coverage_Score,
+        Compliance_Score,
+        Priority_Drs_Coverage_Score,
+        Priority_RX_Drs_Score,
+        BM_Priority_Drs_Coverage_Score
+      FROM bgm_sbuh_dashboard_ftm
+      WHERE SBUH_Territory = ?`,
+      [Territory]
+    );
+
+    // -----------------------------
+    // Fetch YTD data
+    // -----------------------------
+    const [ytdRows] = await pool.query(
+      `SELECT
+        Target_Achievement_Score,
+        Territories_Achieving_Cat_A_MEP_Score,
+        Category_B_Sales_Vs_Target_Score,
+        BMs_Achieving_Target_Score,
+        Span_of_Performance_Score,
+
+        Overall_Attrition_Rate_Score,
+        Secondary_Variance_Score,
+        MSP_Compliance_Territories_Score,
+        MSR_Compliance_Territories_Score,
+      
+
+        Returns_Score,
+        
+        Marketing_Activity_Sales_Score,
+      
+
+        Calls_Score,
+        Team_Coverage_Score,
+        Team_Compliance_Score,
+        Corporate_Drs_Coverage_Score,
+        Corporate_Drs_Active_Prescribers_Score,
+        BM_Priority_Drs_Coverage_Score
+      FROM bgm_sbuh_dashboard_ytd
+      WHERE SBUH_Territory = ?`,
+      [Territory]
+    );
+
+    if (!ftmRows.length || !ytdRows.length) {
+      return res.status(404).json({ message: "No SBUH record found" });
+    }
+
+    const ftm = ftmRows[0];
+    const ytd = ytdRows[0];
+
+    // =============================
+    // BUSINESS PERFORMANCE
+    // =============================
+    const businessMonth =
+      (Number(ftm.Target_Achievement_Score) || 0) +
+      (Number(ftm.Territories_Achieving_Cat_A_MEP_Score) || 0) +
+      (Number(ftm.Category_B_Sales_Vs_Target_Score) || 0) +
+      (Number(ftm.BMs_Achieving_Target_Score) || 0) +
+      (Number(ftm.Span_of_Performance_Score) || 0);
+
+    const businessYTD =
+      (Number(ytd.Target_Achievement_Score) || 0) +
+      (Number(ytd.Territories_Achieving_Cat_A_MEP_Score) || 0) +
+      (Number(ytd.Category_B_Sales_Vs_Target_Score) || 0) +
+      (Number(ytd.BMs_Achieving_Target_Score) || 0) +
+      (Number(ytd.Span_of_Performance_Score) || 0);
+
+    // =============================
+    // PERFORMANCE / EFFORTS
+    // =============================
+    const effortMonth =
+      (Number(ftm.Overall_Attrition_Rate_Score) || 0) +
+      (Number(ftm.Secondary_Variance_Score) || 0) +
+      (Number(ftm.MSP_Compliance_Territories_Score) || 0) +
+    (Number(ftm.MSR_Compliance_Territories_Score) || 0) +
+      (Number(ftm.BE_Active_vs_Sanctioned_Score) || 0) +
+      (Number(ftm.BM_BL_Active_vs_Sanctioned_Score) || 0);
+
+    const effortYTD =
+      (Number(ytd.Overall_Attrition_Rate_Score) || 0) +
+      (Number(ytd.Secondary_Variance_Score) || 0) +
+      (Number(ytd.MSP_Compliance_Territories_Score) || 0) +
+      (Number(ytd.MSR_Compliance_Territories_Score) || 0) 
+    
+
+    // =============================
+    // HYGIENE
+    // =============================
+    const hygieneMonth =
+      (Number(ftm.Returns_Score) || 0) +
+      (Number(ftm.Outstanding_Score) || 0) +
+      (Number(ftm.Marketing_Activity_Sales_Score) || 0) +
+      (Number(ftm.Closing_Score) || 0);
+
+    const hygieneYTD =
+      (Number(ytd.Returns_Score) || 0) +
+     
+      (Number(ytd.Marketing_Activity_Sales_Score) || 0) 
+
+    // =============================
+    // COMMITMENT
+    // =============================
+    const commitmentMonth =
+      (Number(ftm.Calls_Score) || 0) +
+      (Number(ftm.Coverage_Score) || 0) +
+      (Number(ftm.Compliance_Score) || 0) +
+      (Number(ftm.Priority_Drs_Coverage_Score) || 0) +
+      (Number(ftm.Priority_RX_Drs_Score) || 0) +
+      (Number(ftm.BM_Priority_Drs_Coverage_Score) || 0);
+
+    const commitmentYTD =
+      (Number(ytd.Calls_Score) || 0) +
+      (Number(ytd.Team_Coverage_Score) || 0) +
+      (Number(ytd.Team_Compliance_Score) || 0) +
+      (Number(ytd.Corporate_Drs_Coverage_Score) || 0) +
+      (Number(ytd.Corporate_Drs_Active_Prescribers_Score) || 0) +
+      (Number(ytd.BM_Priority_Drs_Coverage_Score) || 0);
+
+    // =============================
+    // EFFICIENCY INDEX
+    // =============================
+    const efficiencyMonth =
+      businessMonth + effortMonth + hygieneMonth + commitmentMonth;
+
+    const efficiencyYTD =
+      businessYTD + effortYTD + hygieneYTD + commitmentYTD;
+
+    res.json({
+      businessMonth,
+      businessYTD,
+      effortMonth,
+      effortYTD,
+      hygieneMonth,
+      hygieneYTD,
+      commitmentMonth,
+      commitmentYTD,
+      efficiencyMonth,
+      efficiencyYTD
+    });
+
+  } catch (err) {
+    console.error("BH Efficiency error:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 
 
 // app.post("/hierarchy-kpi", async (req, res) => {
