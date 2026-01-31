@@ -1656,13 +1656,34 @@ app.post('/getDivisions', async (req, res) => {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT DISTINCT division FROM bgm_bh_dashboard_ftm WHERE BH_Territory = ? ORDER BY division`,
+    // 1️⃣ First check BH table
+    const [bhRows] = await pool.query(
+      `SELECT DISTINCT division 
+       FROM bgm_bh_dashboard_ftm 
+       WHERE BH_Territory = ? 
+       ORDER BY division`,
       [Territory]
     );
 
-    const divisions = rows.map(row => row.division).filter(Boolean);
-    res.json({ divisions });
+    if (bhRows.length > 0) {
+      const divisions = bhRows.map(row => row.division).filter(Boolean);
+      return res.json({ divisions });
+    }
+
+    // 2️⃣ If nothing found, check SBUH table
+    const [sbuhRows] = await pool.query(
+      `SELECT DISTINCT division 
+       FROM bgm_sbuh_dashboard_ftm 
+       WHERE SBUH_Territory = ? 
+       ORDER BY division`,
+      [Territory]
+    );
+
+    const divisions = sbuhRows.map(row => row.division).filter(Boolean);
+
+    // 3️⃣ Return divisions (or empty array if none)
+    return res.json({ divisions });
+
   } catch (error) {
     console.error("Error fetching divisions:", error);
     res.status(500).json({ error: "Internal Server Error" });
