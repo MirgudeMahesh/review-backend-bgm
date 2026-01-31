@@ -418,24 +418,32 @@ app.get('/checkrole', async (req, res) => {
 
 app.get('/getdivision', async (req, res) => {
   try {
-    const { territory } = req.query;
+    const { territory, role } = req.query;
     if (!territory) {
       return res.status(400).json({ error: "territory is required" });
     }
 
-    // Fetch division from organogram table
-    const [rows] = await pool.query(
-      `SELECT Division FROM organogram WHERE Territory = ? LIMIT 1`,
-      [territory]
-    );
+    let query = "";
+    let params = [territory];
 
-    if (rows.length === 0) {
-      return res.json({ division: null }); // No match
+    if (role === 'BH') {
+      query = `SELECT DISTINCT division FROM bgm_bh_dashboard_ftm WHERE BH_Territory = ?`;
+    } else if (role === 'SBUH') {
+      query = `SELECT DISTINCT division FROM bgm_sbuh_dashboard_ftm WHERE SBUH_Territory = ?`;
+    } else {
+      query = `SELECT Division FROM organogram WHERE Territory = ? LIMIT 1`;
     }
 
-    const division = rows[0].Division;
+    const [rows] = await pool.query(query, params);
 
-    res.json({ division });
+    if (role === 'BH' || role === 'SBUH') {
+      const divisions = rows.map(r => r.division).filter(Boolean);
+      res.json({ divisions, division: divisions[0] || null });
+    } else {
+      // For other roles, return a single division as before for backward compatibility
+      const division = rows.length > 0 ? (rows[0].Division || rows[0].division) : null;
+      res.json({ division });
+    }
 
   } catch (err) {
     console.error("Error /getdivision:", err);
@@ -586,47 +594,69 @@ app.post('/blDashboardData', async (req, res) => {
 
 app.post('/bhDashboardData', async (req, res) => {
   try {
-    const { Territory } = req.body; // 👈 Get Territory from frontend
-    
+    const { Territory, Division } = req.body;
+
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT * FROM bgm_bh_dashboard_ftm WHERE BH_Territory = ?`,
-      [Territory] // 👈 Pass safely to prevent SQL injection
-    );
+    let query = `SELECT * FROM bgm_bh_dashboard_ftm WHERE BH_Territory = ?`;
+    let params = [Territory];
 
-    if (rows.length === 0) {
-      return res.status(404).json({ message: "No record found for this Territory" });
+    // Add division filter if provided
+    if (Division) {
+      query += ` AND division = ?`;
+      params.push(Division);
     }
 
-    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+    const [rows] = await pool.query(query, params);
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: Division
+          ? `No FTM record found for Territory: ${Territory}, Division: ${Division}`
+          : `No FTM record found for Territory: ${Territory}`
+      });
+    }
+
+    res.json(rows[0]);
   } catch (error) {
-    console.error("Error fetching data:", error);
+    console.error("Error fetching BH FTM data:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+// 4. SBUH Dashboard FTM Data (with Division filter)
 app.post('/sbuhDashboardData', async (req, res) => {
   try {
-    const { Territory } = req.body; // 👈 Get Territory from frontend
-    
+    const { Territory, Division } = req.body;
+
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT * FROM bgm_sbuh_dashboard_ftm WHERE SBUH_Territory = ?`,
-      [Territory] // 👈 Pass safely to prevent SQL injection
-    );
+    let query = `SELECT * FROM bgm_sbuh_dashboard_ftm WHERE SBUH_Territory = ?`;
+    let params = [Territory];
 
-    if (rows.length === 0) {
-      return res.status(404).json({ message: "No record found for this Territory" });
+    // Add division filter if provided
+    if (Division) {
+      query += ` AND division = ?`;
+      params.push(Division);
     }
 
-    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+    const [rows] = await pool.query(query, params);
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: Division
+          ? `No SBUH FTM record found for Territory: ${Territory}, Division: ${Division}`
+          : `No SBUH FTM record found for Territory: ${Territory}`
+      });
+    }
+
+    res.json(rows[0]);
   } catch (error) {
-    console.error("Error fetching data:", error);
+    console.error("Error fetching SBUH FTM data:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -703,52 +733,72 @@ app.post('/blDashboardytdData', async (req, res) => {
 });
 app.post('/bhDashboardytdData', async (req, res) => {
   try {
-    const { Territory } = req.body; // 👈 Get Territory from frontend
-    
+    const { Territory, Division } = req.body;
+
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT * FROM bgm_bh_dashboard_ytd WHERE BH_Territory = ?`,
-      [Territory] // 👈 Pass safely to prevent SQL injection
-    );
+    let query = `SELECT * FROM bgm_bh_dashboard_ytd WHERE BH_Territory = ?`;
+    let params = [Territory];
 
-    if (rows.length === 0) {
-      return res.status(404).json({ message: "No record found for this Territory" });
+    // Add division filter if provided
+    if (Division) {
+      query += ` AND division = ?`;
+      params.push(Division);
     }
 
-    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+    const [rows] = await pool.query(query, params);
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: Division
+          ? `No YTD record found for Territory: ${Territory}, Division: ${Division}`
+          : `No YTD record found for Territory: ${Territory}`
+      });
+    }
+
+    res.json(rows[0]);
   } catch (error) {
-    console.error("Error fetching data:", error);
+    console.error("Error fetching BH YTD data:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
+// 2. SBUH Dashboard YTD Data (with Division filter)
 app.post('/sbuhDashboardytdData', async (req, res) => {
   try {
-    const { Territory } = req.body; // 👈 Get Territory from frontend
-    
+    const { Territory, Division } = req.body;
+
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT * FROM bgm_sbuh_dashboard_ytd WHERE SBUH_Territory = ?`,
-      [Territory] // 👈 Pass safely to prevent SQL injection
-    );
+    let query = `SELECT * FROM bgm_sbuh_dashboard_ytd WHERE SBUH_Territory = ?`;
+    let params = [Territory];
 
-    if (rows.length === 0) {
-      return res.status(404).json({ message: "No record found for this Territory" });
+    // Add division filter if provided
+    if (Division) {
+      query += ` AND division = ?`;
+      params.push(Division);
     }
 
-    res.json(rows[0]); // 👈 Return only the first (and likely only) matching row
+    const [rows] = await pool.query(query, params);
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: Division
+          ? `No SBUH YTD record found for Territory: ${Territory}, Division: ${Division}`
+          : `No SBUH YTD record found for Territory: ${Territory}`
+      });
+    }
+
+    res.json(rows[0]);
   } catch (error) {
-    console.error("Error fetching data:", error);
+    console.error("Error fetching SBUH YTD data:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 app.post('/dashboardYTD', async (req, res) => {
   try {
     const { Territory } = req.body;
@@ -1226,85 +1276,94 @@ app.post('/blEfficiency', async (req, res) => {
 });
 app.post('/bhEfficiency', async (req, res) => {
   try {
-    const { Territory } = req.body;
+    const { Territory, Division } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
     // -----------------------------
-    // Fetch FTM (Month) data
+    // Build dynamic queries with Division filter
     // -----------------------------
-    const [ftmRows] = await pool.query(
-      `SELECT
-        -- Business Performance
-        Target_Achievement_Score,
-        Territories_Achieving_Cat_A_MEP_Score,
-        Category_B_Sales_Vs_Target_Score,
-        BMs_Achieving_Target_Score,
-        Span_of_Performance_Score,
+    let ftmQuery = `SELECT
+      -- Business Performance
+      Target_Achievement_Score,
+      Territories_Achieving_Cat_A_MEP_Score,
+      Category_B_Sales_Vs_Target_Score,
+      BMs_Achieving_Target_Score,
+      Span_of_Performance_Score,
 
-        -- Performance / Efforts
-        Overall_Attrition_Rate_Score,
-        Secondary_Variance_Score,
-        MSP_Compliance_Territories_Score,
-        MSR_Compliance_Territories_Score,
-        BE_Active_vs_Sanctioned_Score,
-        BM_BL_Active_vs_Sanctioned_Score,
+      -- Performance / Efforts
+      Overall_Attrition_Rate_Score,
+      Secondary_Variance_Score,
+      MSP_Compliance_Territories_Score,
+      MSR_Compliance_Territories_Score,
+      BE_Active_vs_Sanctioned_Score,
+      BM_BL_Active_vs_Sanctioned_Score,
 
-        -- Hygiene
-        Returns_Score,
-        Outstanding_Score,
-        Marketing_Activity_Sales_Score,
-        Closing_Score,
+      -- Hygiene
+      Returns_Score,
+      Outstanding_Score,
+      Marketing_Activity_Sales_Score,
+      Closing_Score,
 
-        -- Commitment
-        Calls_Score,
-        Coverage_Score,
-        Compliance_Score,
-        Priority_Drs_Coverage_Score,
-        Priority_RX_Drs_Score,
-        BM_Priority_Drs_Coverage_Score
-      FROM bgm_bh_dashboard_ftm
-      WHERE BH_Territory = ?`,
-      [Territory]
-    );
+      -- Commitment
+      Calls_Score,
+      Coverage_Score,
+      Compliance_Score,
+      Priority_Drs_Coverage_Score,
+      Priority_RX_Drs_Score,
+      BM_Priority_Drs_Coverage_Score
+    FROM bgm_bh_dashboard_ftm
+    WHERE BH_Territory = ?`;
+
+    let ytdQuery = `SELECT
+      Target_Achievement_Score,
+      Territories_Achieving_Cat_A_MEP_Score,
+      Category_B_Sales_Vs_Target_Score,
+      BMs_Achieving_Target_Score,
+      Span_of_Performance_Score,
+
+      Overall_Attrition_Rate_Score,
+      Secondary_Variance_Score,
+      MSP_Compliance_Territories_Score,
+      MSR_Compliance_Territories_Score,
+
+      Returns_Score,
+      Marketing_Activity_Sales_Score,
+
+      Calls_Score,
+      Team_Coverage_Score,
+      Team_Compliance_Score,
+      Corporate_Drs_Coverage_Score,
+      Corporate_Drs_Active_Prescribers_Score,
+      BM_Priority_Drs_Coverage_Score
+    FROM bgm_bh_dashboard_ytd
+    WHERE BH_Territory = ?`;
+
+    let ftmParams = [Territory];
+    let ytdParams = [Territory];
+
+    // Add division filter if provided
+    if (Division) {
+      ftmQuery += ` AND division = ?`;
+      ytdQuery += ` AND division = ?`;
+      ftmParams.push(Division);
+      ytdParams.push(Division);
+    }
 
     // -----------------------------
-    // Fetch YTD data
+    // Execute queries
     // -----------------------------
-    const [ytdRows] = await pool.query(
-      `SELECT
-        Target_Achievement_Score,
-        Territories_Achieving_Cat_A_MEP_Score,
-        Category_B_Sales_Vs_Target_Score,
-        BMs_Achieving_Target_Score,
-        Span_of_Performance_Score,
-
-        Overall_Attrition_Rate_Score,
-        Secondary_Variance_Score,
-        MSP_Compliance_Territories_Score,
-        MSR_Compliance_Territories_Score,
-      
-
-        Returns_Score,
-        
-        Marketing_Activity_Sales_Score,
-      
-
-        Calls_Score,
-        Team_Coverage_Score,
-        Team_Compliance_Score,
-        Corporate_Drs_Coverage_Score,
-        Corporate_Drs_Active_Prescribers_Score,
-        BM_Priority_Drs_Coverage_Score
-      FROM bgm_bh_dashboard_ytd
-      WHERE BH_Territory = ?`,
-      [Territory]
-    );
+    const [ftmRows] = await pool.query(ftmQuery, ftmParams);
+    const [ytdRows] = await pool.query(ytdQuery, ytdParams);
 
     if (!ftmRows.length || !ytdRows.length) {
-      return res.status(404).json({ message: "No BH record found" });
+      return res.status(404).json({
+        message: Division
+          ? `No BH Efficiency record found for Territory: ${Territory}, Division: ${Division}`
+          : `No BH Efficiency record found for Territory: ${Territory}`
+      });
     }
 
     const ftm = ftmRows[0];
@@ -1342,8 +1401,7 @@ app.post('/bhEfficiency', async (req, res) => {
       (Number(ytd.Overall_Attrition_Rate_Score) || 0) +
       (Number(ytd.Secondary_Variance_Score) || 0) +
       (Number(ytd.MSP_Compliance_Territories_Score) || 0) +
-      (Number(ytd.MSR_Compliance_Territories_Score) || 0) 
-    
+      (Number(ytd.MSR_Compliance_Territories_Score) || 0);
 
     // =============================
     // HYGIENE
@@ -1356,8 +1414,7 @@ app.post('/bhEfficiency', async (req, res) => {
 
     const hygieneYTD =
       (Number(ytd.Returns_Score) || 0) +
-     
-      (Number(ytd.Marketing_Activity_Sales_Score) || 0) 
+      (Number(ytd.Marketing_Activity_Sales_Score) || 0);
 
     // =============================
     // COMMITMENT
@@ -1381,11 +1438,8 @@ app.post('/bhEfficiency', async (req, res) => {
     // =============================
     // EFFICIENCY INDEX
     // =============================
-    const efficiencyMonth =
-      businessMonth + effortMonth + hygieneMonth + commitmentMonth;
-
-    const efficiencyYTD =
-      businessYTD + effortYTD + hygieneYTD + commitmentYTD;
+    const efficiencyMonth = businessMonth + effortMonth + hygieneMonth + commitmentMonth;
+    const efficiencyYTD = businessYTD + effortYTD + hygieneYTD + commitmentYTD;
 
     res.json({
       businessMonth,
@@ -1406,88 +1460,96 @@ app.post('/bhEfficiency', async (req, res) => {
   }
 });
 
-
 app.post('/sbuhEfficiency', async (req, res) => {
   try {
-    const { Territory } = req.body;
+    const { Territory, Division } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
     // -----------------------------
-    // Fetch FTM (Month) data
+    // Build dynamic queries with Division filter
     // -----------------------------
-    const [ftmRows] = await pool.query(
-      `SELECT
-        -- Business Performance
-        Target_Achievement_Score,
-        Territories_Achieving_Cat_A_MEP_Score,
-        Category_B_Sales_Vs_Target_Score,
-        BMs_Achieving_Target_Score,
-        Span_of_Performance_Score,
+    let ftmQuery = `SELECT
+      -- Business Performance
+      Target_Achievement_Score,
+      Territories_Achieving_Cat_A_MEP_Score,
+      Category_B_Sales_Vs_Target_Score,
+      BMs_Achieving_Target_Score,
+      Span_of_Performance_Score,
 
-        -- Performance / Efforts
-        Overall_Attrition_Rate_Score,
-        Secondary_Variance_Score,
-        MSP_Compliance_Territories_Score,
-        MSR_Compliance_Territories_Score,
-        BE_Active_vs_Sanctioned_Score,
-        BM_BL_Active_vs_Sanctioned_Score,
+      -- Performance / Efforts
+      Overall_Attrition_Rate_Score,
+      Secondary_Variance_Score,
+      MSP_Compliance_Territories_Score,
+      MSR_Compliance_Territories_Score,
+      BE_Active_vs_Sanctioned_Score,
+      BM_BL_Active_vs_Sanctioned_Score,
 
-        -- Hygiene
-        Returns_Score,
-        Outstanding_Score,
-        Marketing_Activity_Sales_Score,
-        Closing_Score,
+      -- Hygiene
+      Returns_Score,
+      Outstanding_Score,
+      Marketing_Activity_Sales_Score,
+      Closing_Score,
 
-        -- Commitment
-        Calls_Score,
-        Coverage_Score,
-        Compliance_Score,
-        Priority_Drs_Coverage_Score,
-        Priority_RX_Drs_Score,
-        BM_Priority_Drs_Coverage_Score
-      FROM bgm_sbuh_dashboard_ftm
-      WHERE SBUH_Territory = ?`,
-      [Territory]
-    );
+      -- Commitment
+      Calls_Score,
+      Coverage_Score,
+      Compliance_Score,
+      Priority_Drs_Coverage_Score,
+      Priority_RX_Drs_Score,
+      BM_Priority_Drs_Coverage_Score
+    FROM bgm_sbuh_dashboard_ftm
+    WHERE SBUH_Territory = ?`;
+
+    let ytdQuery = `SELECT
+      Target_Achievement_Score,
+      Territories_Achieving_Cat_A_MEP_Score,
+      Category_B_Sales_Vs_Target_Score,
+      BMs_Achieving_Target_Score,
+      Span_of_Performance_Score,
+
+      Overall_Attrition_Rate_Score,
+      Secondary_Variance_Score,
+      MSP_Compliance_Territories_Score,
+      MSR_Compliance_Territories_Score,
+
+      Returns_Score,
+      Marketing_Activity_Sales_Score,
+
+      Calls_Score,
+      Team_Coverage_Score,
+      Team_Compliance_Score,
+      Corporate_Drs_Coverage_Score,
+      Corporate_Drs_Active_Prescribers_Score,
+      BM_Priority_Drs_Coverage_Score
+    FROM bgm_sbuh_dashboard_ytd
+    WHERE SBUH_Territory = ?`;
+
+    let ftmParams = [Territory];
+    let ytdParams = [Territory];
+
+    // Add division filter if provided
+    if (Division) {
+      ftmQuery += ` AND division = ?`;
+      ytdQuery += ` AND division = ?`;
+      ftmParams.push(Division);
+      ytdParams.push(Division);
+    }
 
     // -----------------------------
-    // Fetch YTD data
+    // Execute queries
     // -----------------------------
-    const [ytdRows] = await pool.query(
-      `SELECT
-        Target_Achievement_Score,
-        Territories_Achieving_Cat_A_MEP_Score,
-        Category_B_Sales_Vs_Target_Score,
-        BMs_Achieving_Target_Score,
-        Span_of_Performance_Score,
-
-        Overall_Attrition_Rate_Score,
-        Secondary_Variance_Score,
-        MSP_Compliance_Territories_Score,
-        MSR_Compliance_Territories_Score,
-      
-
-        Returns_Score,
-        
-        Marketing_Activity_Sales_Score,
-      
-
-        Calls_Score,
-        Team_Coverage_Score,
-        Team_Compliance_Score,
-        Corporate_Drs_Coverage_Score,
-        Corporate_Drs_Active_Prescribers_Score,
-        BM_Priority_Drs_Coverage_Score
-      FROM bgm_sbuh_dashboard_ytd
-      WHERE SBUH_Territory = ?`,
-      [Territory]
-    );
+    const [ftmRows] = await pool.query(ftmQuery, ftmParams);
+    const [ytdRows] = await pool.query(ytdQuery, ytdParams);
 
     if (!ftmRows.length || !ytdRows.length) {
-      return res.status(404).json({ message: "No SBUH record found" });
+      return res.status(404).json({
+        message: Division
+          ? `No SBUH Efficiency record found for Territory: ${Territory}, Division: ${Division}`
+          : `No SBUH Efficiency record found for Territory: ${Territory}`
+      });
     }
 
     const ftm = ftmRows[0];
@@ -1517,7 +1579,7 @@ app.post('/sbuhEfficiency', async (req, res) => {
       (Number(ftm.Overall_Attrition_Rate_Score) || 0) +
       (Number(ftm.Secondary_Variance_Score) || 0) +
       (Number(ftm.MSP_Compliance_Territories_Score) || 0) +
-    (Number(ftm.MSR_Compliance_Territories_Score) || 0) +
+      (Number(ftm.MSR_Compliance_Territories_Score) || 0) +
       (Number(ftm.BE_Active_vs_Sanctioned_Score) || 0) +
       (Number(ftm.BM_BL_Active_vs_Sanctioned_Score) || 0);
 
@@ -1525,8 +1587,7 @@ app.post('/sbuhEfficiency', async (req, res) => {
       (Number(ytd.Overall_Attrition_Rate_Score) || 0) +
       (Number(ytd.Secondary_Variance_Score) || 0) +
       (Number(ytd.MSP_Compliance_Territories_Score) || 0) +
-      (Number(ytd.MSR_Compliance_Territories_Score) || 0) 
-    
+      (Number(ytd.MSR_Compliance_Territories_Score) || 0);
 
     // =============================
     // HYGIENE
@@ -1539,8 +1600,7 @@ app.post('/sbuhEfficiency', async (req, res) => {
 
     const hygieneYTD =
       (Number(ytd.Returns_Score) || 0) +
-     
-      (Number(ytd.Marketing_Activity_Sales_Score) || 0) 
+      (Number(ytd.Marketing_Activity_Sales_Score) || 0);
 
     // =============================
     // COMMITMENT
@@ -1564,11 +1624,8 @@ app.post('/sbuhEfficiency', async (req, res) => {
     // =============================
     // EFFICIENCY INDEX
     // =============================
-    const efficiencyMonth =
-      businessMonth + effortMonth + hygieneMonth + commitmentMonth;
-
-    const efficiencyYTD =
-      businessYTD + effortYTD + hygieneYTD + commitmentYTD;
+    const efficiencyMonth = businessMonth + effortMonth + hygieneMonth + commitmentMonth;
+    const efficiencyYTD = businessYTD + effortYTD + hygieneYTD + commitmentYTD;
 
     res.json({
       businessMonth,
@@ -1584,11 +1641,33 @@ app.post('/sbuhEfficiency', async (req, res) => {
     });
 
   } catch (err) {
-    console.error("BH Efficiency error:", err);
+    console.error("SBUH Efficiency error:", err);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
+
+
+app.post('/getDivisions', async (req, res) => {
+  try {
+    const { Territory } = req.body;
+
+    if (!Territory) {
+      return res.status(400).json({ error: "Territory is required" });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT DISTINCT division FROM bgm_bh_dashboard_ftm WHERE BH_Territory = ? ORDER BY division`,
+      [Territory]
+    );
+
+    const divisions = rows.map(row => row.division).filter(Boolean);
+    res.json({ divisions });
+  } catch (error) {
+    console.error("Error fetching divisions:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
 
 // app.post("/hierarchy-kpi", async (req, res) => {
@@ -2078,7 +2157,7 @@ app.post('/getTable2', async (req, res) => {
 
 // ---------- AI Assistant Route ----------
 
-  // ------------------------------------temporary regarding only be data
+// ------------------------------------temporary regarding only be data
 
 
 // app.post('/api/ask-ai', async (req, res) => {
