@@ -178,7 +178,7 @@ app.post("/hierarchy", async (req, res) => {
         if (childNode) children[c.Territory] = childNode;
       }
 
-      // Node with metrics including all 3 Qty fields
+      // Node with metrics (existing + new commitment fields)
       let node = {
         empName: emp.Emp_Name,
         territory: emp.Territory,
@@ -190,7 +190,7 @@ app.post("/hierarchy", async (req, res) => {
         Compliance: emp.Compliance ? parseFloat(emp.Compliance) : 0,
         Chemist_Calls: emp.Chemist_Calls ? parseFloat(emp.Chemist_Calls) : 0,
 
-        // PRODUCT QTY FIELDS
+        // PRODUCT QTY FIELDS (existing)
         Deksel_Midmonth_Qty: emp.Deksel_Midmonth_Qty
           ? parseFloat(emp.Deksel_Midmonth_Qty)
           : 0,
@@ -202,6 +202,20 @@ app.post("/hierarchy", async (req, res) => {
         Proaxen_Midmonth_Qty: emp.Proaxen_Midmonth_Qty
           ? parseFloat(emp.Proaxen_Midmonth_Qty)
           : 0,
+
+        // 🔥 NEW COMMITMENT FIELDS
+        Deksel_Commitment: emp.Deksel_Commitment
+          ? parseFloat(emp.Deksel_Commitment)
+          : 0,
+
+        Proaxen_Commitment: emp.Proaxen_Commitment
+          ? parseFloat(emp.Proaxen_Commitment)
+          : 0,
+
+        Voltaneuron_Vasoneuron_Commitment:
+          emp.Voltaneuron_Vasoneuron_Commitment
+            ? parseFloat(emp.Voltaneuron_Vasoneuron_Commitment)
+            : 0,
       };
 
       // Aggregation logic
@@ -212,10 +226,15 @@ app.post("/hierarchy", async (req, res) => {
           Compliance: [],
           Chemist_Calls: [],
 
-          // PRODUCT ARRAYS
+          // PRODUCT ARRAYS (existing)
           Deksel_Midmonth_Qty: [],
           Voltaneuron_Midmonth_Qty: [],
           Proaxen_Midmonth_Qty: [],
+
+          // 🔥 NEW COMMITMENT ARRAYS
+          Deksel_Commitment: [],
+          Proaxen_Commitment: [],
+          Voltaneuron_Vasoneuron_Commitment: [],
         };
 
         for (const ch of Object.values(children)) {
@@ -224,10 +243,17 @@ app.post("/hierarchy", async (req, res) => {
           agg.Compliance.push(ch.Compliance || 0);
           agg.Chemist_Calls.push(ch.Chemist_Calls || 0);
 
-          // PUSH CHILD PRODUCT VALUES
+          // EXISTING PRODUCT QTY PUSH
           agg.Deksel_Midmonth_Qty.push(ch.Deksel_Midmonth_Qty || 0);
           agg.Voltaneuron_Midmonth_Qty.push(ch.Voltaneuron_Midmonth_Qty || 0);
           agg.Proaxen_Midmonth_Qty.push(ch.Proaxen_Midmonth_Qty || 0);
+
+          // 🔥 NEW COMMITMENT PUSH
+          agg.Deksel_Commitment.push(ch.Deksel_Commitment || 0);
+          agg.Proaxen_Commitment.push(ch.Proaxen_Commitment || 0);
+          agg.Voltaneuron_Vasoneuron_Commitment.push(
+            ch.Voltaneuron_Vasoneuron_Commitment || 0
+          );
         }
 
         // Avg non-sales fields
@@ -236,17 +262,28 @@ app.post("/hierarchy", async (req, res) => {
         node.Compliance = Math.round(avg(agg.Compliance));
         node.Chemist_Calls = Math.round(avg(agg.Chemist_Calls));
 
-        // SUM product midmonth qty fields
+        // SUM product qty fields
         node.Deksel_Midmonth_Qty = Math.round(sum(agg.Deksel_Midmonth_Qty));
-        node.Voltaneuron_Midmonth_Qty = Math.round(sum(agg.Voltaneuron_Midmonth_Qty));
+        node.Voltaneuron_Midmonth_Qty = Math.round(
+          sum(agg.Voltaneuron_Midmonth_Qty)
+        );
         node.Proaxen_Midmonth_Qty = Math.round(sum(agg.Proaxen_Midmonth_Qty));
+
+        // 🔥 SUM commitment fields
+        node.Deksel_Commitment = Math.round(sum(agg.Deksel_Commitment));
+        node.Proaxen_Commitment = Math.round(sum(agg.Proaxen_Commitment));
+        node.Voltaneuron_Vasoneuron_Commitment = Math.round(
+          sum(agg.Voltaneuron_Vasoneuron_Commitment)
+        );
       }
 
       return node;
     }
 
     const allTerritories = rows.map((r) => r.Territory);
-    const topLevels = rows.filter((r) => !allTerritories.includes(r.Area_Name));
+    const topLevels = rows.filter(
+      (r) => !allTerritories.includes(r.Area_Name)
+    );
 
     const hierarchy = {};
     if (territory) {
@@ -299,11 +336,17 @@ app.put('/updateProductQty', async (req, res) => {
     }
 
     // Validate metric_type
-    const allowedMetrics = [
-      'deksel_midmonth_qty', 
-      'voltaneuron_midmonth_qty', 
-      'proaxen_midmonth_qty'
-    ];
+   const allowedMetrics = [
+  'deksel_midmonth_qty',
+  'voltaneuron_midmonth_qty',
+  'proaxen_midmonth_qty',
+
+  // 🔥 newly added commitment metrics
+  'deksel_commitment',
+  'proaxen_commitment',
+  'voltaneuron_vasoneuron_commitment'
+];
+
 
     if (!allowedMetrics.includes(metric_type.toLowerCase())) {
       return res.status(400).json({ 
