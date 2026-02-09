@@ -1927,6 +1927,7 @@ app.get("/getData/:territory", async (req, res) => {
         DATE_FORMAT(receiver_commit_date, '%Y-%m-%d') AS receiver_commit_date
       FROM commitments
       WHERE receiver_territory = ?
+      ORDER BY received_date DESC
       `,
       [territory]
     );
@@ -1937,6 +1938,7 @@ app.get("/getData/:territory", async (req, res) => {
     res.status(500).send("Server error");
   }
 });
+
 
 
 
