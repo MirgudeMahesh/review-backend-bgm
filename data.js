@@ -65,7 +65,7 @@ app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 
 // app.use(cors({
 //   origin: allowedOrigins,
-//   credentials: true
+//   credentials: true
 // }));
 app.use(express.json());
 
@@ -139,18 +139,22 @@ app.get('/healthz', (_, res) => res.send('ok'));
 
 app.post("/hierarchy", async (req, res) => {
   try {
-    const { territory, includeInactive } = req.body || {};
+    const { territory, includeInactive, Month } = req.body || {};
     let rows = [];
 
-    if (includeInactive === true) {
-      [rows] = await pool.query(
-        "SELECT * FROM hierarchy_metrics_agg_rm"
-      );
-    } else {
-      [rows] = await pool.query(
-        "SELECT * FROM hierarchy_metrics_agg_rm WHERE Emp_Code != 'Vacant'"
-      );
+    let query = "SELECT * FROM hierarchy_metrics_agg_rm WHERE 1=1";
+    let params = [];
+
+    if (includeInactive !== true) {
+      query += " AND Emp_Code != 'Vacant'";
     }
+
+    if (Month) {
+      query += " AND Period = ?";
+      params.push(Month);
+    }
+
+    [rows] = await pool.query(query, params);
 
     if (!rows.length) return res.json({ message: "No data found" });
 
@@ -327,51 +331,61 @@ app.get('/employees', async (req, res) => {
 
 app.put('/updateProductQty', async (req, res) => {
   try {
-    const { territory, metric_type, value } = req.body;
+    const { territory, metric_type, value, Month } = req.body;
 
     if (!territory || !metric_type || value === undefined) {
-      return res.status(400).json({ 
-        error: "territory, metric_type, and value are required" 
+      return res.status(400).json({
+        error: "territory, metric_type, and value are required"
       });
     }
 
     // Validate metric_type
-   const allowedMetrics = [
-  'deksel_midmonth_qty',
-  'voltaneuron_midmonth_qty',
-  'proaxen_midmonth_qty',
+    const allowedMetrics = [
+      'deksel_midmonth_qty',
+      'voltaneuron_midmonth_qty',
+      'proaxen_midmonth_qty',
 
-  // 🔥 newly added commitment metrics
-  'deksel_commitment',
-  'proaxen_commitment',
-  'voltaneuron_vasoneuron_commitment'
-];
+      // 🔥 newly added commitment metrics
+      'deksel_commitment',
+      'proaxen_commitment',
+      'voltaneuron_vasoneuron_commitment'
+    ];
 
 
     if (!allowedMetrics.includes(metric_type.toLowerCase())) {
-      return res.status(400).json({ 
-        error: "Invalid metric_type" 
+      return res.status(400).json({
+        error: "Invalid metric_type"
       });
     }
 
     // Check current value
-    const [currentRows] = await pool.query(
-      `SELECT ${metric_type} FROM hierarchy_metrics_agg_rm WHERE Territory = ?`,
-      [territory]
-    );
+    let query = `SELECT ${metric_type} FROM hierarchy_metrics_agg_rm WHERE Territory = ?`;
+    let params = [territory];
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
+    }
+
+    const [currentRows] = await pool.query(query, params);
 
     if (currentRows.length > 0 && currentRows[0][metric_type] === value) {
       return res.json({ alreadyUpToDate: true });
     }
 
     // Update the value
-    const [result] = await pool.query(
-      `UPDATE hierarchy_metrics_agg_rm SET ${metric_type} = ? WHERE Territory = ?`,
-      [value, territory]
-    );
+    let updateQuery = `UPDATE hierarchy_metrics_agg_rm SET ${metric_type} = ? WHERE Territory = ?`;
+    let updateParams = [value, territory];
 
-    res.json({ 
-      success: true, 
+    if (Month) {
+      updateQuery += ` AND Period = ?`;
+      updateParams.push(Month);
+    }
+
+    const [result] = await pool.query(updateQuery, updateParams);
+
+    res.json({
+      success: true,
       affectedRows: result.affectedRows,
       alreadyUpToDate: false
     });
@@ -389,8 +403,8 @@ app.post('/midmonth-review', async (req, res) => {
 
     // Validate required fields
     if (!sender_territory || !receiver_territory || !Metric || Value === undefined) {
-      return res.status(400).json({ 
-        error: "All fields are required: sender_territory, receiver_territory, Metric, Value" 
+      return res.status(400).json({
+        error: "All fields are required: sender_territory, receiver_territory, Metric, Value"
       });
     }
 
@@ -408,7 +422,7 @@ app.post('/midmonth-review', async (req, res) => {
     );
 
     // Return success response
-    res.status(201).json({ 
+    res.status(201).json({
       success: true,
       message: "Record inserted successfully",
       insertId: result.insertId,
@@ -417,9 +431,9 @@ app.post('/midmonth-review', async (req, res) => {
 
   } catch (err) {
     console.error("Error /midmonth-review:", err);
-    res.status(500).json({ 
+    res.status(500).json({
       error: "Server Error",
-      details: err.message 
+      details: err.message
     });
   }
 });
@@ -447,7 +461,7 @@ app.get('/checkrole', async (req, res) => {
     const allowedRoles = ['BE', 'KAE', 'TE', 'NE'];
     const isAllowed = allowedRoles.includes(role);
 
-    res.json({ 
+    res.json({
       allowed: isAllowed,
       role: rows[0].Role,
       name: rows[0].Emp_Name // Return actual role for debugging
@@ -566,16 +580,21 @@ app.post('/putData', async (req, res) => {
 });
 app.post('/dashboardData', async (req, res) => {
   try {
-    const { Territory } = req.body; // 👈 Get Territory from frontend
-    
+    const { Territory, Month } = req.body; // 👈 Get Territory from frontend
+
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT * FROM bgm_be_dashboard_ftm WHERE Territory = ?`,
-      [Territory] // 👈 Pass safely to prevent SQL injection
-    );
+    let query = `SELECT * FROM bgm_be_dashboard_ftm WHERE Territory = ?`;
+    let params = [Territory];
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
+    }
+
+    const [rows] = await pool.query(query, params);
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "No record found for this Territory" });
@@ -590,16 +609,21 @@ app.post('/dashboardData', async (req, res) => {
 
 app.post('/bmDashboardData', async (req, res) => {
   try {
-    const { Territory } = req.body; // 👈 Get Territory from frontend
-    
+    const { Territory, Month } = req.body; // 👈 Get Territory from frontend
+
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT * FROM bgm_bm_dashboard_ftm WHERE BM_Territory = ?`,
-      [Territory] // 👈 Pass safely to prevent SQL injection
-    );
+    let query = `SELECT * FROM bgm_bm_dashboard_ftm WHERE BM_Territory = ?`;
+    let params = [Territory];
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
+    }
+
+    const [rows] = await pool.query(query, params);
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "No record found for this Territory" });
@@ -613,16 +637,21 @@ app.post('/bmDashboardData', async (req, res) => {
 });
 app.post('/blDashboardData', async (req, res) => {
   try {
-    const { Territory } = req.body; // 👈 Get Territory from frontend
-    
+    const { Territory, Month } = req.body; // 👈 Get Territory from frontend
+
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT * FROM bgm_bl_dashboard_ftm WHERE BL_Territory = ?`,
-      [Territory] // 👈 Pass safely to prevent SQL injection
-    );
+    let query = `SELECT * FROM bgm_bl_dashboard_ftm WHERE BL_Territory = ?`;
+    let params = [Territory];
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
+    }
+
+    const [rows] = await pool.query(query, params);
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "No record found for this Territory" });
@@ -637,7 +666,7 @@ app.post('/blDashboardData', async (req, res) => {
 
 app.post('/bhDashboardData', async (req, res) => {
   try {
-    const { Territory, Division } = req.body;
+    const { Territory, Division, Month } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
@@ -650,6 +679,11 @@ app.post('/bhDashboardData', async (req, res) => {
     if (Division) {
       query += ` AND division = ?`;
       params.push(Division);
+    }
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
     }
 
     const [rows] = await pool.query(query, params);
@@ -672,7 +706,7 @@ app.post('/bhDashboardData', async (req, res) => {
 // 4. SBUH Dashboard FTM Data (with Division filter)
 app.post('/sbuhDashboardData', async (req, res) => {
   try {
-    const { Territory, Division } = req.body;
+    const { Territory, Division, Month } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
@@ -685,6 +719,11 @@ app.post('/sbuhDashboardData', async (req, res) => {
     if (Division) {
       query += ` AND division = ?`;
       params.push(Division);
+    }
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
     }
 
     const [rows] = await pool.query(query, params);
@@ -706,16 +745,21 @@ app.post('/sbuhDashboardData', async (req, res) => {
 
 app.post('/dashboardytdData', async (req, res) => {
   try {
-    const { Territory } = req.body; // 👈 Get Territory from frontend
-    
+    const { Territory, Month } = req.body; // 👈 Get Territory from frontend
+
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT * FROM bgm_be_dashboard_ytd WHERE Territory = ?`,
-      [Territory] // 👈 Pass safely to prevent SQL injection
-    );
+    let query = `SELECT * FROM bgm_be_dashboard_ytd WHERE Territory = ?`;
+    let params = [Territory];
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
+    }
+
+    const [rows] = await pool.query(query, params);
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "No record found for this Territory" });
@@ -730,16 +774,21 @@ app.post('/dashboardytdData', async (req, res) => {
 
 app.post('/bmDashboardytdData', async (req, res) => {
   try {
-    const { Territory } = req.body; // 👈 Get Territory from frontend
-    
+    const { Territory, Month } = req.body; // 👈 Get Territory from frontend
+
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT * FROM bgm_bm_dashboard_ytd WHERE BM_Territory = ?`,
-      [Territory] // 👈 Pass safely to prevent SQL injection
-    );
+    let query = `SELECT * FROM bgm_bm_dashboard_ytd WHERE BM_Territory = ?`;
+    let params = [Territory];
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
+    }
+
+    const [rows] = await pool.query(query, params);
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "No record found for this Territory" });
@@ -753,16 +802,21 @@ app.post('/bmDashboardytdData', async (req, res) => {
 });
 app.post('/blDashboardytdData', async (req, res) => {
   try {
-    const { Territory } = req.body; // 👈 Get Territory from frontend
-    
+    const { Territory, Month } = req.body; // 👈 Get Territory from frontend
+
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT * FROM bgm_bl_dashboard_ytd WHERE BL_Territory = ?`,
-      [Territory] // 👈 Pass safely to prevent SQL injection
-    );
+    let query = `SELECT * FROM bgm_bl_dashboard_ytd WHERE BL_Territory = ?`;
+    let params = [Territory];
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
+    }
+
+    const [rows] = await pool.query(query, params);
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "No record found for this Territory" });
@@ -776,7 +830,7 @@ app.post('/blDashboardytdData', async (req, res) => {
 });
 app.post('/bhDashboardytdData', async (req, res) => {
   try {
-    const { Territory, Division } = req.body;
+    const { Territory, Division, Month } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
@@ -789,6 +843,11 @@ app.post('/bhDashboardytdData', async (req, res) => {
     if (Division) {
       query += ` AND division = ?`;
       params.push(Division);
+    }
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
     }
 
     const [rows] = await pool.query(query, params);
@@ -811,7 +870,7 @@ app.post('/bhDashboardytdData', async (req, res) => {
 // 2. SBUH Dashboard YTD Data (with Division filter)
 app.post('/sbuhDashboardytdData', async (req, res) => {
   try {
-    const { Territory, Division } = req.body;
+    const { Territory, Division, Month } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
@@ -824,6 +883,11 @@ app.post('/sbuhDashboardytdData', async (req, res) => {
     if (Division) {
       query += ` AND division = ?`;
       params.push(Division);
+    }
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
     }
 
     const [rows] = await pool.query(query, params);
@@ -844,14 +908,13 @@ app.post('/sbuhDashboardytdData', async (req, res) => {
 });
 app.post('/dashboardYTD', async (req, res) => {
   try {
-    const { Territory } = req.body;
+    const { Territory, Month } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT 
+    let query = `SELECT 
          Calls_Score,
          RCPA_Score,
          Coverage_Score,
@@ -862,9 +925,15 @@ app.post('/dashboardYTD', async (req, res) => {
          RX_Growth_Score,
          Brand_Performance_Index_Score
        FROM bgm_be_dashboard_ytd
-       WHERE Territory = ?`,
-      [Territory]
-    );
+       WHERE Territory = ?`;
+    let params = [Territory];
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
+    }
+
+    const [rows] = await pool.query(query, params);
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "No record found for this Territory" });
@@ -873,18 +942,18 @@ app.post('/dashboardYTD', async (req, res) => {
     const row = rows[0];
 
     // First set
-   const totalScore1 =(
-  (Number(row.Calls_Score) || 0) +
-  (Number(row.RCPA_Score) || 0) +
-  (Number(row.Coverage_Score) || 0) +
-  (Number(row.Compliance_Score) || 0) +
-  (Number(row.Activity_Implementation_Score) || 0)).toFixed(2);
+    const totalScore1 = (
+      (Number(row.Calls_Score) || 0) +
+      (Number(row.RCPA_Score) || 0) +
+      (Number(row.Coverage_Score) || 0) +
+      (Number(row.Compliance_Score) || 0) +
+      (Number(row.Activity_Implementation_Score) || 0)).toFixed(2);
 
-const totalScore2 =(
-  (Number(row.Secondary_Sales_growth_Score) || 0) +
-  (Number(row.MSR_Achievement_Score) || 0) +
-  (Number(row.RX_Growth_Score) || 0) +
-  (Number(row.Brand_Performance_Index_Score) || 0)).toFixed(2);
+    const totalScore2 = (
+      (Number(row.Secondary_Sales_growth_Score) || 0) +
+      (Number(row.MSR_Achievement_Score) || 0) +
+      (Number(row.RX_Growth_Score) || 0) +
+      (Number(row.Brand_Performance_Index_Score) || 0)).toFixed(2);
 
 
     res.json({
@@ -901,14 +970,13 @@ const totalScore2 =(
 
 app.post('/dashboardFTD', async (req, res) => {
   try {
-    const { Territory } = req.body;
+    const { Territory, Month } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
-    const [rows] = await pool.query(
-      `SELECT 
+    let query = `SELECT 
          Calls_Score,
          RCPA_Score,
          Coverage_Score,
@@ -919,9 +987,15 @@ app.post('/dashboardFTD', async (req, res) => {
          RX_Growth_Score,
          Brand_Performance_Index_Score
        FROM bgm_be_dashboard_ftm
-       WHERE Territory = ?`,
-      [Territory]
-    );
+       WHERE Territory = ?`;
+    let params = [Territory];
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
+    }
+
+    const [rows] = await pool.query(query, params);
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "No record found for this Territory" });
@@ -930,20 +1004,20 @@ app.post('/dashboardFTD', async (req, res) => {
     const row = rows[0];
 
     // First set
-const totalScore3 = (
-  (Number(row.Calls_Score) || 0) +
-  (Number(row.RCPA_Score) || 0) +
-  (Number(row.Coverage_Score) || 0) +
-  (Number(row.Compliance_Score) || 0) +
-  (Number(row.Activity_Implementation_Score) || 0)
-).toFixed(2);
+    const totalScore3 = (
+      (Number(row.Calls_Score) || 0) +
+      (Number(row.RCPA_Score) || 0) +
+      (Number(row.Coverage_Score) || 0) +
+      (Number(row.Compliance_Score) || 0) +
+      (Number(row.Activity_Implementation_Score) || 0)
+    ).toFixed(2);
 
-const totalScore4 = (
-  (Number(row.Secondary_Sales_growth_Score) || 0) +
-  (Number(row.MSR_Achievement_Score) || 0) +
-  (Number(row.RX_Growth_Score) || 0) +
-  (Number(row.Brand_Performance_Index_Score) || 0)
-).toFixed(2);
+    const totalScore4 = (
+      (Number(row.Secondary_Sales_growth_Score) || 0) +
+      (Number(row.MSR_Achievement_Score) || 0) +
+      (Number(row.RX_Growth_Score) || 0) +
+      (Number(row.Brand_Performance_Index_Score) || 0)
+    ).toFixed(2);
 
 
     res.json({
@@ -959,15 +1033,14 @@ const totalScore4 = (
 // BM Efficiency Index endpoint
 app.post('/bmEfficiency', async (req, res) => {
   try {
-    const { Territory } = req.body;
+    const { Territory, Month } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
     // 1) Fetch FTM (month) scores for BM
-    const [ftmRows] = await pool.query(
-      `SELECT
+    let ftmQuery = `SELECT
          Target_Achieved_FTM_Score,
          BPI_FTM_Score,
          Span_Performance_FTM_Score,
@@ -988,13 +1061,18 @@ app.post('/bmEfficiency', async (req, res) => {
          CA_FTM_Score,
          Closing_FTM_Score
        FROM bgm_bm_dashboard_ftm   -- your BM FTM table
-       WHERE BM_Territory = ?`,
-      [Territory]
-    );
+       WHERE BM_Territory = ?`;
+    let ftmParams = [Territory];
+
+    if (Month) {
+      ftmQuery += ` AND Period = ?`;
+      ftmParams.push(Month);
+    }
+
+    const [ftmRows] = await pool.query(ftmQuery, ftmParams);
 
     // 2) Fetch YTD scores for BM
-    const [ytdRows] = await pool.query(
-      `SELECT
+    let ytdQuery = `SELECT
          Target_Achieved_YTD_Score,
          Brand_Performance_Index_YTD_Score,
          Span_of_Performance_YTD_Score,
@@ -1013,9 +1091,15 @@ app.post('/bmEfficiency', async (req, res) => {
          Returns_Percent_YTD_Score,
          CA_Percent_YTD_Score
        FROM bgm_bm_dashboard_ytd   -- your BM YTD table
-       WHERE BM_Territory = ?`,
-      [Territory]
-    );
+       WHERE BM_Territory = ?`;
+    let ytdParams = [Territory];
+
+    if (Month) {
+      ytdQuery += ` AND Period = ?`;
+      ytdParams.push(Month);
+    }
+
+    const [ytdRows] = await pool.query(ytdQuery, ytdParams);
 
     if (!ftmRows.length || !ytdRows.length) {
       return res.status(404).json({ message: "No BM record found for this Territory" });
@@ -1116,15 +1200,14 @@ app.post('/bmEfficiency', async (req, res) => {
 });
 app.post('/blEfficiency', async (req, res) => {
   try {
-    const { Territory } = req.body;
+    const { Territory, Month } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
     }
 
     // 1) Fetch FTM (month) scores for BL
-    const [ftmRows] = await pool.query(
-      `SELECT
+    let ftmQuery = `SELECT
          -- Business Performance FTM
          Target_Achievement_Score,
          Territories_Achieving_Target_Score,
@@ -1155,13 +1238,18 @@ app.post('/blEfficiency', async (req, res) => {
          MSR_Compliance_Territories_Score
 
        FROM bgm_bl_dashboard_ftm
-       WHERE BL_Territory = ?`,
-      [Territory]
-    );
+       WHERE BL_Territory = ?`;
+    let ftmParams = [Territory];
+
+    if (Month) {
+      ftmQuery += ` AND Period = ?`;
+      ftmParams.push(Month);
+    }
+
+    const [ftmRows] = await pool.query(ftmQuery, ftmParams);
 
     // 2) Fetch YTD scores for BL
-    const [ytdRows] = await pool.query(
-      `SELECT
+    let ytdQuery = `SELECT
          -- Business Performance YTD
          Target_Achievement_Score,
          Territories_Achieving_Target_Score,
@@ -1190,9 +1278,15 @@ app.post('/blEfficiency', async (req, res) => {
          MSR_Compliance_Territories_Score
 
        FROM bgm_bl_dashboard_ytd
-       WHERE BL_Territory = ?`,
-      [Territory]
-    );
+       WHERE BL_Territory = ?`;
+    let ytdParams = [Territory];
+
+    if (Month) {
+      ytdQuery += ` AND Period = ?`;
+      ytdParams.push(Month);
+    }
+
+    const [ytdRows] = await pool.query(ytdQuery, ytdParams);
 
     if (!ftmRows.length || !ytdRows.length) {
       return res.status(404).json({ message: "No BL record found for this Territory" });
@@ -1219,7 +1313,7 @@ app.post('/blEfficiency', async (req, res) => {
       (Number(ytd.Territories_Achieving_Cat_A_MEP_Score) || 0) +
       (Number(ytd.Corporate_Drs_Coverage_Score) || 0) +
       (Number(ytd.Category_B_Sales_Vs_Target_Score) || 0) +
-   
+
       (Number(ytd.Corporate_Drs_Active_Prescribers_Score) || 0)
     ).toFixed(2);
 
@@ -1319,7 +1413,7 @@ app.post('/blEfficiency', async (req, res) => {
 });
 app.post('/bhEfficiency', async (req, res) => {
   try {
-    const { Territory, Division } = req.body;
+    const { Territory, Division, Month } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
@@ -1393,6 +1487,13 @@ app.post('/bhEfficiency', async (req, res) => {
       ytdQuery += ` AND division = ?`;
       ftmParams.push(Division);
       ytdParams.push(Division);
+    }
+
+    if (Month) {
+      ftmQuery += ` AND Period = ?`;
+      ytdQuery += ` AND Period = ?`;
+      ftmParams.push(Month);
+      ytdParams.push(Month);
     }
 
     // -----------------------------
@@ -1505,7 +1606,7 @@ app.post('/bhEfficiency', async (req, res) => {
 
 app.post('/sbuhEfficiency', async (req, res) => {
   try {
-    const { Territory, Division } = req.body;
+    const { Territory, Division, Month } = req.body;
 
     if (!Territory) {
       return res.status(400).json({ error: "Territory is required" });
@@ -1579,6 +1680,13 @@ app.post('/sbuhEfficiency', async (req, res) => {
       ytdQuery += ` AND division = ?`;
       ftmParams.push(Division);
       ytdParams.push(Division);
+    }
+
+    if (Month) {
+      ftmQuery += ` AND Period = ?`;
+      ytdQuery += ` AND Period = ?`;
+      ftmParams.push(Month);
+      ytdParams.push(Month);
     }
 
     // -----------------------------
@@ -1905,15 +2013,15 @@ app.post('/putEscalations', async (req, res) => {
   }
 });
 
-  // ------------------------------------temporary regarding only be data
+// ------------------------------------temporary regarding only be data
 
 // ---------- Get commitments by territory ----------
 app.get("/getData/:territory", async (req, res) => {
   try {
     const territory = req.params.territory;
+    const { Month } = req.query;
 
-    const [rows] = await pool.query(
-      `
+    let query = `
       SELECT 
         id,
         metric,
@@ -1927,10 +2035,18 @@ app.get("/getData/:territory", async (req, res) => {
         DATE_FORMAT(receiver_commit_date, '%Y-%m-%d') AS receiver_commit_date
       FROM commitments
       WHERE receiver_territory = ?
-      ORDER BY received_date DESC
-      `,
-      [territory]
-    );
+    `;
+    let params = [territory];
+
+    if (Month) {
+      // Month format 'YYYY-MM'
+      query += ` AND received_date LIKE ?`;
+      params.push(`${Month}%`);
+    }
+
+    query += ` ORDER BY received_date DESC`;
+
+    const [rows] = await pool.query(query, params);
 
     res.json(rows);
   } catch (err) {
@@ -2057,28 +2173,28 @@ app.post('/putInfo', async (req, res) => {
       return res.status(400).json({ error: "No data received" });
     }
 
-const values = data.map(row => {
-  let personalizedMsg = row.message;
+    const values = data.map(row => {
+      let personalizedMsg = row.message;
 
-  // Replace placeholders
-  if (personalizedMsg.includes("@name")) {
-    personalizedMsg = personalizedMsg.replace(/@name/g, row.receiver);
-  }
-  if (personalizedMsg.includes("@metric") && row.metric !== undefined) {
-    personalizedMsg = personalizedMsg.replace(/@metric/g, row.metric);
-  }
+      // Replace placeholders
+      if (personalizedMsg.includes("@name")) {
+        personalizedMsg = personalizedMsg.replace(/@name/g, row.receiver);
+      }
+      if (personalizedMsg.includes("@metric") && row.metric !== undefined) {
+        personalizedMsg = personalizedMsg.replace(/@metric/g, row.metric);
+      }
 
-  return [
-    row.sender || null,
-    row.sender_code || null,
-    row.sender_territory || null,
-    row.receiver || null,
-    row.receiver_code || null,
-    row.receiver_territory || null,
-    row.received_date || null,
-    personalizedMsg || null
-  ];
-});
+      return [
+        row.sender || null,
+        row.sender_code || null,
+        row.sender_territory || null,
+        row.receiver || null,
+        row.receiver_code || null,
+        row.receiver_territory || null,
+        row.received_date || null,
+        personalizedMsg || null
+      ];
+    });
 
 
 
@@ -2111,7 +2227,7 @@ const values = data.map(row => {
 const ALLOWED_METRICS = ['Coverage', 'Compliance', 'Doctor_Calls', 'Chemist_Met']; // <- Replace with your actual numeric columns
 app.post("/filterData", async (req, res) => {
   try {
-    const { metric, from, to } = req.body;
+    const { metric, from, to, Month } = req.body;
 
     if (!metric || from === undefined || to === undefined) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -2121,14 +2237,21 @@ app.post("/filterData", async (req, res) => {
       return res.status(400).json({ error: "Invalid metric" });
     }
 
-    const query = `
+    let query = `
       SELECT Territory, Emp_Code, Emp_Name, \`${metric}\`
       FROM bgm_be_dashboard_ftm
-      WHERE \`${metric}\` BETWEEN ? AND ?  and Emp_Code != 'Vacant';
+      WHERE \`${metric}\` BETWEEN ? AND ?  and Emp_Code != 'Vacant'
     `;
-    const [rows] = await pool.query(query, [from, to]);
+    let params = [from, to];
+
+    if (Month) {
+      query += ` AND Period = ?`;
+      params.push(Month);
+    }
+
+    const [rows] = await pool.query(query, params);
     res.json(rows);
-   
+
   } catch (error) {
     console.error("Error /filterData:", error);
     res.status(500).json({ error: "Database error" });
