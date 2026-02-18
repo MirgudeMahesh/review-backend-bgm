@@ -1255,7 +1255,7 @@ app.post('/blEfficiency', async (req, res) => {
          Territories_Achieving_Target_Score,
          Territories_Achieving_Cat_A_MEP_Score,
          Category_B_Sales_Vs_Target_Score,
-        
+        Corporate_Drs_Coverage_Score,
          Corporate_Drs_Active_Prescribers_Score,
 
          -- Performance (Efforts) YTD
