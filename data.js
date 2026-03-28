@@ -2055,6 +2055,49 @@ app.get("/getData/:territory", async (req, res) => {
   }
 });
 
+app.get("/getReports/:territory", async (req, res) => {
+  try {
+    const territory = req.params.territory;
+    const { period } = req.query; // e.g. ?period=2026-03
+
+    let query = `
+      SELECT *
+      FROM day_report
+      WHERE territory = ?
+    `;
+
+    let params = [territory];
+
+    if (period) {
+      // If period stored like 'YYYY-MM'
+      query += ` AND period = ?`;
+      params.push(period);
+
+      // OR if period is a DATE column, use this instead:
+      // query += ` AND DATE_FORMAT(period, '%Y-%m') = ?`;
+      // params.push(period);
+    }
+
+    query += ` ORDER BY period DESC`;
+
+    const [rows] = await pool.query(query, params);
+
+    // Exclude unwanted columns from the response
+    const EXCLUDED_COLS = new Set(["Division", "Emp_Code", "Emp_Name", "Role", "status", "Date","Region","HQ"]);
+    const filtered = rows.map(row => {
+      const cleaned = {};
+      for (const key of Object.keys(row)) {
+        if (!EXCLUDED_COLS.has(key)) cleaned[key] = row[key];
+      }
+      return cleaned;
+    });
+
+    res.json(filtered);
+  } catch (err) {
+    console.error("Error fetching reports:", err);
+    res.status(500).send("Server error");
+  }
+});
 
 
 
